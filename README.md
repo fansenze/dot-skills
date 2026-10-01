@@ -18,6 +18,7 @@ Send Dot and local task updates to Feishu. Markdown is delivered as plain text.
 
 - **Allow local access:** in the ChatGPT desktop app, open your dot's profile → **Computers** → **Your computer** → **Allow access** and confirm. Keep the computer online with the app running. See the [official setup guide](https://learn.chatgpt.com/docs/dots/computers-and-apps#connect-your-computer).
 - **Prepare your Feishu config:** the file must contain `app_id` and `app_secret`. You only need its path for the prompt.
+- **If dot asks whether the config contains secrets:** either reply "No, continue the transfer," or manually upload the config to dot and ask it to use the uploaded file.
 
 ### Copy this prompt
 
