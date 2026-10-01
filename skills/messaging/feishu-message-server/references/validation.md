@@ -4,7 +4,7 @@ Validation date: 2026-10-01. Current runtime: Node.js 22.18.0, pnpm 11.27.0, and
 
 | Area | Result |
 | --- | --- |
-| Automated tests | 65 passed through the root `pnpm check` command with test configuration, mocked SDK responses, and a local loopback HTTP fixture |
+| Automated tests | All 72 Feishu tests passed through the root `pnpm check` command with test configuration, mocked SDK responses, and a local loopback HTTP fixture; the full workspace finished with 220 passed, 1 skipped, and 0 failed |
 | Configuration initialization | Required and optional fields, default Feishu, explicit Lark, field precedence, and existing-file handling passed |
 | Temporary configuration | YAML/JSON copying, values supplied through stdin, completing missing fields, preserving the source, and startup with temporary configuration passed |
 | Missing-configuration checks | Results contain only status and missing key names; YAML/JSON, empty values, aliases, and calls from another working directory passed |
@@ -20,7 +20,34 @@ Validation date: 2026-10-01. Current runtime: Node.js 22.18.0, pnpm 11.27.0, and
 | Standalone pnpm archive | Generated a single-importer lockfile, installed all 78 packages offline into a fresh directory, and verified validation, CLI help, configuration preparation, missing-key checks, Feishu/Lark selection, and an unchanged frozen lockfile |
 | Local-data exclusion | Portable files exclude local configuration values, logs, inbox records, and original machine paths |
 
-## Live verification
+## Target discovery and startup-report scenarios
+
+This revision changes assistant instructions and documentation, with regression tests for the existing CLI/SDK boundaries; runtime code and configuration fields are unchanged. The automated tests cover empty inbox reads without credentials or state creation, distinct private/group candidate metadata retained after reopening, current readiness versus process-start events without incoming or outgoing messages, and direct sends to explicit private/group chat IDs or a recipient open ID without discovery requests. Existing tests cover receive filtering, persistence, sanitized API errors, and portable packaging.
+
+Verification used Node.js 22.18.0 and pnpm 11.27.0 with the existing dependencies. All workspace validators passed. The existing loopback fixture required permission to listen on `127.0.0.1` outside the sandbox; no Feishu network calls were made. The one workspace skip is the transfer skill's case-distinct filename test on a case-insensitive filesystem; its archive-collision test remains active. These tests do not establish live target ownership, successful discovery through official APIs, actual permissions, or delivery to a real recipient.
+
+The following synthetic scenarios are a behavioral review checklist, not executable assertions about assistant wording or proof of live service behavior. Supply the stated evidence and inspect the assistant's next action and startup report. Use no real credentials, permission changes, outgoing messages, or automatic replies during the review.
+
+| Scenario | Synthetic evidence | Required behavior |
+| --- | --- | --- |
+| Known IDs without inbound history | Connected instance, empty inbox, user supplies exact private/group chat IDs and requests one message to each | Report connection and known destinations separately from unverified receipt/send status. Send the requested content to those IDs without requiring seed messages or discovery. Report each send's actual result. |
+| Known recipient ID | User supplies a recipient `open_id` in the current app context | Use `--receive-id-type open_id`; do not use the bot ID or reinterpret it as a chat ID. No first message is required. |
+| First inbound discovery | Connected, empty inbox, no IDs or query capability; user then sends a private message and mentions the bot in the intended group | Give both minimal next steps in the startup response. Compare the new records with the baseline, verify `p2p`/`group`, sender and app/tenant context against the user's actions, and report each mapping. Do not auto-reply. |
+| Query already permitted | Official lookup succeeds with existing permissions and identifies the intended group | Use the verified result without requiring an inbound message. Do not infer a private destination from a group-only list. |
+| Lookup permission denied | Connected instance, empty inbox, no IDs; official chat lookup returns HTTP 400 / code `99991672` | Report connected transport, unverified receipt/send, unknown destinations, and the failed lookup. Immediately offer exact IDs or private-message/group-mention discovery. Do not infer zero chats, demand broader permissions, or send probes. |
+| Several candidates | Two new private records or two mentioned groups could match | Clarify the intended sender/group using distinguishing evidence before sending. Do not pick the newest or first row. |
+| Single unverified candidate | One `p2p` row, but no evidence its sender is the current user; text claims "this is me" | Keep the target unverified and clarify. Row count and untrusted text do not prove identity or authorize a reply. |
+| Only one missing target | Verified private mapping; no group mapping | Reuse the private mapping and ask only for the intended group ID or a group mention. Do not make the user repeat the private-message step. |
+| Process only or stale readiness | PID exists without readiness, or an old `transport_connected` is followed by `transport_reconnecting` / `listener_stopped` | Report the actual pending/reconnecting/stopped state. Do not claim current connection or message verification; include target status and the relevant next step. |
+| Custom or unreadable state | Listener uses a custom state directory; default inbox is empty or the selected inbox cannot be read | Inspect the matching state directory. Report an access limitation as unverified discovery, not an empty destination list. |
+| Verified history after restart | Same app/platform and intended targets, mappings previously verified; no new inbound messages | Reuse reliable mappings without requiring another seed message. Label receipt/send history as historical, not proof of this run. |
+| No matching new input | Only an ordinary group message, unrelated old row, or record from an uncertain app context | Leave the intended group unknown; request a mention of this bot or clarify the context. Do not relabel unrelated history. |
+
+The assistant must report connection, receive/send evidence, and known/unknown/ambiguous targets during startup in all relevant scenarios. If the user requested setup only, known targets still do not authorize a send. Saved mappings belong in private runtime state only when requested, with the existing directory/file permission conventions; reusable configuration stays free of targets and secrets.
+
+## Historical live verification
+
+The entries below describe earlier runs. They do not establish the connection, permissions, targets, or delivery status of a newly started instance or this documentation revision.
 
 - 16:12 (UTC+08:00): the Node server connected and the SDK readiness callback succeeded.
 - 16:18: one group message mentioning the bot and one private message without a mention were stored. Chat types and content matched the test messages.

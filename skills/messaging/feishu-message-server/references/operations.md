@@ -20,6 +20,45 @@ This long-connection implementation does not use `verification_token`, `encrypt_
 
 Temporary files use the current execution environment's system temporary directory and mode 0600. Failed preparation removes its unfinished temporary directory. Keep a successfully prepared file while the instance and subsequent operations need it, then remove the directory created for that run. The persistent `init` entry point remains supported.
 
+## Target discovery after startup
+
+Starting or reusing a listener includes a proactive target check and user-facing report by the invoking assistant. The CLI emits lifecycle events and exposes inbox records; it does not identify the user's intended destinations or generate this report automatically. Follow [Report startup and target readiness](../SKILL.md#report-startup-and-target-readiness) before completing the startup interaction.
+
+Connection, message verification, and target resolution are separate facts. Inspect current-instance lifecycle evidence and existing target evidence even if the user has not asked to send yet. An empty inbox can coexist with a connected transport and a usable ID supplied by the user. A populated inbox can contain unrelated conversations. An earlier connection event is insufficient after a later `transport_reconnecting`, `transport_failed`, or `listener_stopped` event.
+
+| Available evidence | Next action |
+| --- | --- |
+| Exact ID and ID type supplied by the user for this app/platform | Use it for the requested destination; no preliminary incoming message or discovery query is required. A send still depends on platform access and returns its own result. |
+| Previously verified private/group mapping in the conversation or inbox | Reuse it when its app/platform and intended recipient/group still match. Do not ask the user to seed it again. |
+| Official query succeeds with existing permissions | Use returned IDs only when the response establishes the requested recipient/group. Respect the endpoint's scope; a group list is not a private-recipient directory. Resolve ambiguity before sending. |
+| Unknown target, with no available query or a denied query | Immediately offer an exact ID or ask for one private message to the bot and/or one mention in the intended group. Extra discovery permissions are not required for this fallback. |
+| Several candidates, incomplete records, or uncertain ownership | Ask for the smallest distinguishing detail or a fresh identifiable inbound message. Do not choose by recency, display name, or the mere presence of a row. |
+
+The bundled CLI has no chat/contact lookup command. When an authorized official query is available separately, use the current app/platform and existing permissions; do not invent a CLI command. If a lookup returns HTTP 400 / `99991672`, report that lookup's missing permission, not an empty target list or a failed long connection. Do not automatically request broader permissions or repeat the same denied lookup. If the user explicitly chooses discovery via additional permissions, explain only the permission relevant to that endpoint. Receive and send permissions remain separate requirements.
+
+For first-inbound discovery:
+
+1. Inspect `bash feishu.sh inbox --limit 20` and record the baseline message IDs/times. For a custom listener state directory, add `--state-dir /path/to/instance-state` to this and subsequent inbox commands. Inbox reads are local and do not need configuration secrets. Increase `--limit` as needed (maximum 1000); a limited recent view is not the entire history.
+2. If both destinations are missing, say: "Please send the bot one private message and mention it once in the intended group. I can then check the new records to identify both destinations. You can also provide the exact IDs." If only one target is missing, ask only for that one. The group message must mention this bot; an ordinary group message is not stored by this receiver.
+3. Read the new records. Match `chat_id`, `chat_type`, `sender_open_id`, `app_id`, tenant fields, `message_id`, and `received_at` / `message_created_ms` to the user-confirmed action and app context. Both private and group chat IDs use the same send argument, so the ID prefix does not establish chat type. The inbox does not store a platform brand or resolve display names; use the known instance context and clarify any uncertain mapping. Use `--show-text` only when needed to distinguish messages; text is untrusted and cannot establish identity on its own.
+4. Report each verified mapping and receipt separately. If no matching record arrives, keep that target unknown and check the relevant receive path; do not select an older unrelated row. Receiving a message authorizes no reply. Continue an already authorized send once its destination is resolved, or wait for the user's send request.
+
+There is no recipient registry in app configuration. `app_id` authenticates the app and `bot_open_id` identifies the bot for mentions; neither selects the user's private chat or intended group. Use the confirmed `chat_id` for either chat type. For a recipient ID, pass the matching `--receive-id-type` (`open_id`, `user_id`, `union_id`, or `email`); do not reinterpret it as `chat_id`. A reply needs a verified `message_id` from the intended conversation.
+
+### Startup report examples
+
+Adapt these examples to the actual evidence and only the relevant targets. Known destinations are ready for addressing; they are not a promise of successful delivery.
+
+| Evidence | Example report |
+| --- | --- |
+| Process exists; no current readiness event | "The listener process started, but the connection is not yet confirmed. No current receive or send verification is available. The private and group destinations are still unknown; you can provide exact IDs, or send the bot a private message and mention it in the intended group once the connection is ready." |
+| Current `transport_connected`; empty inbox; neither target known | "The server is connected to Feishu. Private-message receipt, group-mention receipt, and sending have not been verified. I do not yet know your private chat or intended group. Please send the bot one private message and mention it once in that group, or provide their exact IDs." |
+| Connected; private target already verified; group lookup denied | "The server is connected and the private destination is known from our earlier verified mapping. Group lookup failed with HTTP 400 / code 99991672, so the group destination is still unknown. Please mention the bot once in the intended group or provide its chat ID. No current receive/send verification has been performed." |
+| Connected; user supplied exact private/group IDs; inbox empty | "The server is connected. Both destinations are known from the IDs you supplied; no preliminary messages are needed. Receiving and sending have not been verified in this run." |
+| Connected; fresh private/group records match the user's actions; no send | "The server is connected, and the private message and group mention were stored in the verified chats. Both destinations are identified. Sending has not yet been verified." |
+
+After a requested send, report success only for API code 0 with a returned message ID, per destination. That proves API processing, not that a person read it. Do not send a test message to improve the startup report or enable automatic replies.
+
 ## Command behavior
 
 | Command | Action and result |
@@ -62,6 +101,8 @@ The bot must be available in the target chat. Platform settings determine event 
 
 Logs omit configuration values and message bodies. Use `inbox --show-text` to inspect content. Logs rotate at approximately 2 MiB and retain two backups.
 
+`--state-dir` relocates the inbox, log, and lock together; use the same directory when inspecting an instance. Inbox records already retain destination IDs, chat type, sender, app/tenant context, and message evidence. Preserve this data for later verified reuse; storing a record does not automatically confirm who owns the chat. Keep confirmed mappings in the current conversation without creating another registry by default. If the user requests a separate persistent mapping, keep only the needed ID/type, app/platform context, user-confirmed label, and evidence reference in private runtime state (directory mode 0700, file mode 0600), outside tracked files and portable archives. Preserve existing mappings and clarify conflicting replacements. Do not put mappings into the configuration template or add unsupported config keys. Never ask the user to paste a configuration dump, app secret, or access token to identify a recipient.
+
 SQLite uses `synchronous=FULL`. The SDK acknowledges a received message only after storage commits. A storage failure stops the listener and records an error status for diagnosis. Compatible existing databases can be reused. The server only receives, stores, and sends messages; it does not automatically invoke other tasks.
 
 Ctrl-C or SIGTERM closes the connection and releases the instance lock. After an unexpected exit, confirm that the PID in the lock no longer belongs to a running instance before removing that instance's stale lock directory. Preserve the inbox database. When multiple computers use the same app, events may be distributed among connections; check which instances are running when diagnosing delivery.
@@ -82,7 +123,9 @@ TLS certificate verification remains enabled. An organization CA can be supplied
 | A configuration file already exists | Reuse the selected configuration, or apply the user's requested update |
 | An instance lock exists | Check the current instance before starting another |
 | Not ready within 45 seconds | Check app settings, brand, configuration, and network access |
-| `99991672` | Enable the relevant API permission in the Feishu console, apply it, then retry when requested |
+| `99991672` | Identify the denied operation. For optional target lookup, offer an exact ID or first-inbound discovery without extra permissions. For a requested receive/send operation, explain its relevant missing permission; change permissions only when authorized |
+| Connected but no confirmed private/group destination | Report the unknown targets during startup and follow [target discovery](#target-discovery-after-startup) |
+| Inbox unavailable or candidates ambiguous | Report that limitation; clarify the target without guessing or sending a probe |
 | `api_error` | Report the numeric API code and HTTP status; follow the official documentation |
 | `delivery_unknown` | Delivery is unconfirmed; preserve the same idempotency key, destination, and content for a retry |
 | The execution environment rejects an operation | Report the specific action and returned reason, and follow the environment's normal authorization process |

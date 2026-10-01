@@ -14,6 +14,8 @@ Skills for receiving, storing, sending, and replying to messages across communic
 
 Feishu Message Server defaults to domestic Feishu. Select `lark` explicitly for the international platform. It accepts YAML or JSON configuration and starts the server as soon as setup prepares the configuration. When the user selects a configuration file on their computer for a server on Dot, it installs and invokes Transfer Local Files to dot first, then uses the verified Dot-local file. It also provides missing-key diagnostics, a local inbox, and a portable archive command.
 
+After startup, Dot proactively reports the verified connection state, message receive/send evidence, and whether the relevant private and group destinations are known. A running process does not prove a connection, and a connection does not prove message delivery or identify a recipient. Exact user-supplied IDs, verified history, or official queries with existing permissions can resolve targets; users do not have to message first every time. If a target is unknown and lookup is unavailable, Dot immediately asks for an exact ID or one private message to the bot / one mention in the intended group, then verifies the new inbox records. Ambiguous candidates require clarification. Startup does not trigger test sends, automatic replies, or broader permissions.
+
 See its [operations guide](skills/messaging/feishu-message-server/references/operations.md) for commands and its [validation record](skills/messaging/feishu-message-server/references/validation.md) for tested behavior and coverage limits.
 
 ### Automation
@@ -107,6 +109,8 @@ pnpm feishu start --config /path/to/temporary/config.yml
 ```
 
 The required configuration keys are `app_id` and `app_secret`. Optional keys are `brand` and `bot_open_id`. Stop the listener with Ctrl-C and remove the temporary configuration when it is no longer needed.
+
+Destination IDs are per-operation arguments, not configuration keys. Keep verified target evidence in the conversation and private runtime data; do not publish real IDs or configuration secrets in skill files. See [target discovery and startup examples](skills/messaging/feishu-message-server/references/operations.md#target-discovery-after-startup) for the assistant's next steps after `start`.
 
 For Manage Dot Tasks, the root shortcut forwards options to the CLI. Select a store outside the checkout, and place global options before the command:
 

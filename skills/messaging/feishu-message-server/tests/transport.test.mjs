@@ -78,6 +78,25 @@ test('SDK Client create/reply encode payload and resolve token through injected 
   assert.equal(JSON.parse(reply.data).reply_in_thread, true); assert.equal(JSON.parse(reply.data).uuid, 'reply_key');
   assert.equal(JSON.parse(JSON.parse(reply.data).content).text, 'reply');
 });
+for (const [receiveId, receiveIdType] of [
+  ['oc_private_fixture', 'chat_id'], ['oc_group_fixture', 'chat_id'], ['ou_recipient_fixture', 'open_id']
+]) test(`known ${receiveId} sends with its selected ID type and no discovery request`, async t => {
+  const n = createNetwork(); t.after(() => n.close()); const calls = [];
+  n.httpInstance.defaults.adapter = async request => {
+    calls.push(request);
+    const data = request.url.includes('tenant_access_token')
+      ? {code: 0, tenant_access_token: 'fixture-token', expire: 7200}
+      : {code: 0, data: {message_id: 'om_requested'}};
+    return {data, status: 200, statusText: 'OK', headers: {}, config: request};
+  };
+  const result = await sendText(createClient(config(), n), {receiveId, receiveIdType, text: 'Requested fixture', idempotencyKey: 'requested_send'});
+  assert.deepEqual(result, {ok: true, message_id: 'om_requested', idempotency_key: 'requested_send'});
+  // The SDK may reuse its cached tenant token from another client.
+  const messageCalls = calls.filter(request => !request.url.includes('tenant_access_token'));
+  assert.deepEqual(messageCalls.map(request => new URL(request.url).pathname), ['/open-apis/im/v1/messages']);
+  assert.equal(messageCalls[0].params.receive_id_type, receiveIdType);
+  assert.equal(JSON.parse(messageCalls[0].data).receive_id, receiveId);
+});
 test('SDK socket supports our domain, public agent and lifecycle callbacks without starting a network connection', t => {
   const n = createNetwork(); t.after(() => n.close());
   const s = createSocket(config(), n, {onReady() {}}); t.after(() => s.close({force: true}));

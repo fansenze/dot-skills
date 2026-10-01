@@ -213,6 +213,54 @@ test('SQLite deduplication survives reopening by message ID and event ID', t => 
   assert.equal(readInbox(p).length, 2); assert.equal(readInbox(p)[0].text, undefined);
   assert.equal(readInbox(p)[0].content, undefined); assert.equal(readInbox(p, 20, true)[0].text, m.text);
 });
+test('CLI inbox reports no records without creating runtime state or requiring credentials', t => {
+  const stateDir = path.join(temporary(t), 'unused-state');
+  const result = cli(['inbox', '--state-dir', stateDir]);
+  assert.equal(result.status, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {messages: []});
+  assert.equal(fs.existsSync(stateDir), false);
+});
+test('CLI inbox retains distinct private and group destination evidence after reopening', async t => {
+  const stateDir = path.join(temporary(t), 'selected-instance');
+  const box = new Inbox(path.join(stateDir, 'messages.sqlite3'));
+  const dispatcher = createDispatcher(config(), box);
+  const candidates = [
+    ['p2p', 'private_a', 'ou_user_a'],
+    ['p2p', 'private_b', 'ou_user_b'],
+    ['group', 'group_a', 'ou_user_a'],
+    ['group', 'group_b', 'ou_user_a']
+  ];
+  try {
+    for (const [chatType, suffix, sender] of candidates) {
+      const payload = event(chatType);
+      payload.header.event_id = `event_${suffix}`;
+      payload.event.sender.sender_id.open_id = sender;
+      payload.event.sender.tenant_key = 'sender_tenant_test';
+      Object.assign(payload.event.message, {message_id: `om_${suffix}`, chat_id: `oc_${suffix}`, create_time: '1800000000000'});
+      await dispatcher.invoke(payload, {needCheck: false});
+    }
+  } finally { box.close(); }
+  const result = cli(['inbox', '--state-dir', stateDir, '--limit', '10']);
+  assert.equal(result.status, 0);
+  const {messages} = JSON.parse(result.stdout);
+  assert.deepEqual(messages.map(m => [m.chat_type, m.chat_id, m.sender_open_id]),
+    candidates.toReversed().map(([type, suffix, sender]) => [type, `oc_${suffix}`, sender]));
+  for (const m of messages) {
+    assert.equal(m.app_id, input.app_id);
+    assert.equal(m.tenant_key, 'tenant_test');
+    assert.equal(m.sender_tenant_key, 'sender_tenant_test');
+    assert.equal(m.message_id, m.chat_id.replace(/^oc_/, 'om_'));
+    assert.equal(m.event_id, m.chat_id.replace(/^oc_/, 'event_'));
+    assert.equal(m.message_created_ms, '1800000000000');
+    assert.equal(typeof m.received_at, 'number');
+    assert.equal(m.trust, 'unverified_external_input');
+    assert.equal(m.text, undefined);
+    assert.equal(m.content, undefined);
+  }
+  const recent = cli(['inbox', '--state-dir', stateDir, '--limit', '1']);
+  assert.equal(recent.status, 0);
+  assert.deepEqual(JSON.parse(recent.stdout).messages, messages.slice(0, 1));
+});
 test('official Node dispatcher flattening retains event IDs and persists before return', async t => {
   const p = path.join(temporary(t), 'messages.sqlite3'), box = new Inbox(p); t.after(() => box.close());
   const logs = [], dispatcher = createDispatcher(config(), box, name => logs.push(name));
@@ -248,6 +296,21 @@ test('listener connects, accepts private input, and shuts down using injected tr
   assert.equal(closed, true); assert.ok(logs.includes('transport_connected'));
   assert.equal(readInbox(path.join(dir, 'messages.sqlite3')).length, 1);
   assert.ok(!fs.existsSync(path.join(dir, 'node-listener.lock')));
+});
+for (const ready of [false, true]) test(`listener ${ready ? 'readiness' : 'process start'} alone creates no message evidence or outgoing calls`, async t => {
+  const dir = temporary(t), controller = new AbortController(), logs = [], outgoingCalls = [];
+  const unexpectedSend = async request => { outgoingCalls.push(request); throw new Error('Unexpected outgoing message'); };
+  await startListener(config(), {stateDir: dir, signal: controller.signal, log: name => logs.push(name),
+    networkFactory: () => ({close() {}}),
+    clientFactory: () => ({im: {message: {create: unexpectedSend, reply: unexpectedSend}}}),
+    socketFactory: (c, n, callbacks) => ({async start() {
+      if (ready) callbacks.onReady();
+      controller.abort();
+    }, close() {}})});
+  assert.deepEqual(logs, ['listener_starting', 'bot_identity_resolved', ...(ready ? ['transport_connected'] : []), 'listener_stopped']);
+  assert.deepEqual(readInbox(path.join(dir, 'messages.sqlite3')), []);
+  assert.deepEqual(outgoingCalls, []);
+  assert.equal(fs.existsSync(path.join(dir, 'node-listener.lock')), false);
 });
 test('listener terminal error returns failure and cleans up resources', async t => {
   const dir = temporary(t);
