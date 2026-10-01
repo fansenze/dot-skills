@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feishu Message Server"
+  short_description: "Portable Feishu listener and explicit message send/reply CLI"
+  default_prompt: "Use $feishu-message-server to configure and run a local Feishu message server."

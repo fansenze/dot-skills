@@ -1,0 +1,6 @@
+# Supply a file or these keys during the skill interaction.
+# prepare creates the runtime configuration. Both keys below are required.
+app_id: ""
+app_secret: ""
+# brand defaults to feishu; select lark explicitly for the international platform.
+# bot_open_id is optional; startup retrieves it when omitted.

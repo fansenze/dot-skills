@@ -1,0 +1,25 @@
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Installed dependencies and generated output
+node_modules/
+.cache/
+dist/
+coverage/
+*.tgz
+
+# Per-skill runtime files
+.local/
+*.log
+*.log.*
+*.sqlite3
+*.sqlite3-*
+
+# Local configuration; keep example templates tracked
+config.yml
+config.yaml
+config.json
+.env
+.env.*
+!.env.example

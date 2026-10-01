@@ -1,0 +1,22 @@
+{
+  "name": "feishu-message-server-skill",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Portable Feishu/Lark message transport skill; no task execution",
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning scripts/server.mjs start",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.mjs",
+    "validate": "node scripts/validate.mjs"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.74.0",
+    "proxy-agent": "8.0.2",
+    "yaml": "2.9.1"
+  },
+  "files": [
+    "SKILL.md", "agents/", "config.example.yml", "feishu.sh", ".gitignore",
+    "package-lock.json", "scripts/*.mjs", "tests/*.test.mjs", "references/"
+  ]
+}
