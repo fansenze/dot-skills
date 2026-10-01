@@ -4,7 +4,7 @@ Validation date: 2026-10-01. Current runtime: Node.js 22.18.0, pnpm 11.27.0, and
 
 | Area | Result |
 | --- | --- |
-| Automated tests | All 72 Feishu tests passed through the root `pnpm check` command with test configuration, mocked SDK responses, and a local loopback HTTP fixture; the full workspace finished with 220 passed, 1 skipped, and 0 failed |
+| Automated tests | All 83 Feishu tests passed through the root `pnpm check` command with test configuration, mocked SDK responses, and a local loopback HTTP fixture; the final full workspace run finished with 231 passed, 1 skipped, and 0 failed |
 | Configuration initialization | Required and optional fields, default Feishu, explicit Lark, field precedence, and existing-file handling passed |
 | Temporary configuration | YAML/JSON copying, values supplied through stdin, completing missing fields, preserving the source, and startup with temporary configuration passed |
 | Missing-configuration checks | Results contain only status and missing key names; YAML/JSON, empty values, aliases, and calls from another working directory passed |
@@ -22,7 +22,7 @@ Validation date: 2026-10-01. Current runtime: Node.js 22.18.0, pnpm 11.27.0, and
 
 ## Target discovery and startup-report scenarios
 
-This revision changes assistant instructions and documentation, with regression tests for the existing CLI/SDK boundaries; runtime code and configuration fields are unchanged. The automated tests cover empty inbox reads without credentials or state creation, distinct private/group candidate metadata retained after reopening, current readiness versus process-start events without incoming or outgoing messages, and direct sends to explicit private/group chat IDs or a recipient open ID without discovery requests. Existing tests cover receive filtering, persistence, sanitized API errors, and portable packaging.
+The earlier target-discovery revision changed assistant instructions and documentation, with regression tests for the existing CLI/SDK boundaries; it left runtime code and configuration fields unchanged. Those tests cover empty inbox reads without credentials or state creation, distinct private/group candidate metadata retained after reopening, current readiness versus process-start events without incoming or outgoing messages, and direct sends to explicit private/group chat IDs or a recipient open ID without discovery requests. Existing tests cover receive filtering, persistence, sanitized API errors, and portable packaging.
 
 Verification used Node.js 22.18.0 and pnpm 11.27.0 with the existing dependencies. All workspace validators passed. The existing loopback fixture required permission to listen on `127.0.0.1` outside the sandbox; no Feishu network calls were made. The one workspace skip is the transfer skill's case-distinct filename test on a case-insensitive filesystem; its archive-collision test remains active. These tests do not establish live target ownership, successful discovery through official APIs, actual permissions, or delivery to a real recipient.
 
@@ -44,6 +44,36 @@ The following synthetic scenarios are a behavioral review checklist, not executa
 | No matching new input | Only an ordinary group message, unrelated old row, or record from an uncertain app context | Leave the intended group unknown; request a mention of this bot or clarify the context. Do not relabel unrelated history. |
 
 The assistant must report connection, receive/send evidence, and known/unknown/ambiguous targets during startup in all relevant scenarios. If the user requested setup only, known targets still do not authorize a send. Saved mappings belong in private runtime state only when requested, with the existing directory/file permission conventions; reusable configuration stays free of targets and secrets.
+
+## HTTP timeout and send troubleshooting
+
+The HTTP timeout revision changes the common authentication/message HTTP default from 15 to a fixed 30 seconds and adds sanitized request diagnostics. It adds no configuration option, environment override, dependency, automatic send retry, or timeout extension. WebSocket handshake/discovery and listener readiness timing remain unchanged.
+
+Eleven additional Node regressions verify the actual SDK authentication/send/reply request timeouts, authentication versus message-phase failure, per-request timing that excludes earlier authentication, numeric API error preservation, diagnostic redaction, startup diagnostics, explicit retry payload/key reuse, new keys for changed messages, and unchanged WebSocket endpoint timing. The timeout cases inject adapter failures and a controlled monotonic clock; they do not wait 30 seconds or prove live network behavior. The existing loopback fixture also verifies real HTTP error metadata. All 83 Feishu tests passed both in the checkout and in a separate exported directory after a frozen offline pnpm installation. The export's 17 source files matched, its generated lockfile produced 18 archive files, and standalone validation, English-content checks, and CLI help passed.
+
+The first full workspace run passed the Feishu and transfer suites but hit `ENOENT` in the untouched task-ledger test "dead owner recovery and transaction replay remain safe under contention" while resolving a lock directory. That case passed in isolation, and a second full `pnpm check` passed with 231 passed, 1 skipped, and 0 failed. The intermittent task-ledger failure was not fixed or fully diagnosed in this change. The existing case-sensitive filename skip remains as described above. No live messages, cloud listener restarts, or installed cloud-skill changes were performed.
+
+The user reported these cloud observations; this repository revision did not repeat them:
+
+| Reported attempt | Evidence | Conclusion supported |
+| --- | --- | --- |
+| Private send after restart, 15-second HTTP timeout | Authentication failed after 15,016 ms with `ECONNABORTED`; message API was never called | This attempt did not send; investigate authentication/network latency in the sender |
+| Group send after restart, 15-second HTTP timeout | Authentication succeeded; message request timed out after 15,004 ms | Delivery was unknown; receiving normally did not prove the send path worked |
+| Temporary 60-second diagnostic run, private send | Authentication 14.326 s; send 13.418 s; HTTP 200 / API code 0 | That trial succeeded; it does not isolate a restart effect |
+| Temporary 60-second diagnostic run, group send | Authentication 13.314 s; send 11.060 s; HTTP 200 / API code 0 | That trial succeeded; it does not establish that future requests always fit within 30 seconds |
+
+The selected implementation remains a fixed 30 seconds per authentication/message HTTP request. The temporary 60-second runs are historical evidence, not a supported setting or permission to extend timeouts automatically. Neither API acceptance nor these observations prove that a person read the messages.
+
+Review these assistant decisions separately from automated Node assertions:
+
+| Scenario | Required behavior |
+| --- | --- |
+| Listener receives normally; authentication times out before sending | Report `not_sent` for this attempt with the safe authentication diagnostics. Diagnose the sender; do not restart the healthy listener or blame permissions without evidence. |
+| Authentication succeeds; send/reply times out | Report `delivery_unknown` and the message request's duration. Do not automatically resend or increase the timeout. |
+| User authorizes a retry of an uncertain send | Preserve target/ID type, exact text, reply options, and original idempotency key. A content/destination change is a new message with a new key. |
+| Tool approval is pending, denied, or interrupted | Distinguish tool execution from Feishu results. If execution is uncertain, do not claim API failure/success or rerun automatically. |
+| API returns an error, or HTTP 200 lacks API code 0 and a message ID | Report the actual rejection or uncertain response; do not claim API acceptance or user receipt. |
+| A later attempt succeeds after a restart | Report only the observed result. Do not claim that restarting repaired sending without evidence linking cause and effect. |
 
 ## Historical live verification
 

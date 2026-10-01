@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
+import { performance } from 'node:perf_hooks';
 import { fromMapping } from '../scripts/config.mjs';
-import { createNetwork, createClient, createSocket, resolveBotIdentity, sendText, outgoingContent } from '../scripts/transport.mjs';
+import { createNetwork, createClient, createSocket, resolveBotIdentity, sendText, outgoingContent, getHttpDiagnostics } from '../scripts/transport.mjs';
 
 const input = {app_id: 'cli_0000000000000000', app_secret: 'test-secret-only'};
 const config = () => fromMapping(input);
@@ -17,6 +18,21 @@ function proxyEnvironment(t) {
     Object.assign(process.env, saved);
   });
 }
+
+function httpFixture(t, name, respond) {
+  const network = createNetwork(); t.after(() => network.close());
+  const calls = [];
+  network.httpInstance.defaults.adapter = async request => {
+    calls.push(request);
+    const data = await respond(request);
+    return {data, status: 200, statusText: 'OK', headers: {}, config: request};
+  };
+  // A distinct synthetic app isolates the SDK's token cache between cases.
+  const client = createClient(fromMapping({...input, app_id: `fixture-${name}`}), network);
+  return {network, client, calls};
+}
+const tokenResponse = {code: 0, tenant_access_token: 'fixture-token', expire: 7200};
+const isAuthentication = request => request.url.endsWith('/auth/v3/tenant_access_token/internal');
 
 test('bot identity comes from authenticated bot.open_id response shape', async () => {
   let payload;
@@ -57,7 +73,14 @@ test('HTTP API adapter rejects non-2xx and returns the expected SDK response sha
   const n = createNetwork(); t.after(() => n.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   assert.deepEqual(await n.httpInstance.get(base + '/ok'), {code: 0, data: {fixture: true}});
-  await assert.rejects(n.httpInstance.get(base + '/error'), e => e.response.status === 403);
+  await assert.rejects(n.httpInstance.get(base + '/error'), error => {
+    const details = getHttpDiagnostics(error);
+    assert.equal(error.response.status, 403);
+    assert.equal(details.http_status, 403); assert.equal(details.code, 403);
+    assert.equal(details.error_type, 'http_error'); assert.equal(details.request_phase, 'unknown');
+    assert.ok(Number.isInteger(details.elapsed_ms) && details.elapsed_ms >= 0);
+    return true;
+  });
 });
 test('SDK Client create/reply encode payload and resolve token through injected HTTP adapter', async t => {
   const n = createNetwork(); t.after(() => n.close()); const calls = [];
@@ -77,6 +100,108 @@ test('SDK Client create/reply encode payload and resolve token through injected 
   assert.equal(JSON.parse(create.data).uuid, 'stable_key'); assert.equal(JSON.parse(create.data).receive_id, 'oc_fixture');
   assert.equal(JSON.parse(reply.data).reply_in_thread, true); assert.equal(JSON.parse(reply.data).uuid, 'reply_key');
   assert.equal(JSON.parse(JSON.parse(reply.data).content).text, 'reply');
+});
+test('authentication, send and reply share a fixed 30-second HTTP timeout without automatic retries', async t => {
+  const {client, calls} = httpFixture(t, 'fixed-http-timeout', request => isAuthentication(request)
+    ? tokenResponse : {code: 0, data: {message_id: 'om_response'}});
+  assert.equal((await sendText(client, {receiveId: 'oc_fixture', text: 'fixture'})).ok, true);
+  assert.equal((await sendText(client, {messageId: 'om_original', text: 'fixture reply'})).ok, true);
+  assert.deepEqual(calls.map(request => [new URL(request.url).pathname, request.timeout]), [
+    ['/open-apis/auth/v3/tenant_access_token/internal', 30000],
+    ['/open-apis/im/v1/messages', 30000],
+    ['/open-apis/im/v1/messages/om_original/reply', 30000]
+  ]);
+});
+for (const [name, failedPhase, options, phase, elapsed, code] of [
+  ['authentication', 'authentication', {receiveId: 'oc_fixture'}, 'authentication', 30016, 'ECONNABORTED'],
+  ['send', 'message', {receiveId: 'oc_fixture'}, 'send', 30004, 'ECONNABORTED'],
+  ['reply', 'message', {messageId: 'om_original'}, 'reply', 30009, 'ETIMEDOUT']
+]) test(`${name} timeout retains only safe per-request diagnostics and never retries`, async t => {
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  const {client, calls} = httpFixture(t, `timeout-${name}`, request => {
+    const auth = isAuthentication(request);
+    if (auth && failedPhase !== 'authentication') { now += 14326; return tokenResponse; }
+    now += elapsed;
+    throw Object.assign(new Error('private error text with token and message body'), {
+      code, config: request, request: {headers: {authorization: 'private-header'}},
+      response: undefined
+    });
+  });
+  const result = await sendText(client, {...options, text: 'private message body', idempotencyKey: 'stable_operation'});
+  assert.deepEqual(result, {ok: false, idempotency_key: 'stable_operation',
+    status: failedPhase === 'authentication' ? 'not_sent' : 'delivery_unknown',
+    request_phase: phase, error_type: 'timeout', error_code: code, elapsed_ms: elapsed});
+  assert.equal(calls.length, failedPhase === 'authentication' ? 1 : 2);
+  assert.ok(calls.every(request => request.timeout === 30000));
+  if (failedPhase === 'authentication') assert.ok(calls.every(isAuthentication));
+});
+for (const [name, data, errorType] of [
+  ['API failure', {code: 99991672, msg: 'private API message'}, 'api_error'],
+  ['missing token', {code: 0, msg: 'private API message'}, 'invalid_response']
+]) test(`authentication ${name} preserves status/code before SDK wrapping and never sends`, async t => {
+  let now = 0; t.mock.method(performance, 'now', () => now);
+  const {client, calls} = httpFixture(t, `auth-${errorType}`, () => { now += 1234; return data; });
+  const result = await sendText(client, {receiveId: 'oc_fixture', text: 'private body', idempotencyKey: 'stable'});
+  assert.deepEqual(result, {ok: false, idempotency_key: 'stable', status: 'not_sent',
+    request_phase: 'authentication', error_type: errorType, elapsed_ms: 1234, http_status: 200, code: data.code});
+  assert.equal(calls.length, 1); assert.ok(isAuthentication(calls[0]));
+});
+test('send API failure retains numeric API/HTTP codes and send duration without response content', async t => {
+  let now = 0; t.mock.method(performance, 'now', () => now);
+  const {client} = httpFixture(t, 'send-api-failure', request => {
+    if (isAuthentication(request)) { now += 11000; return tokenResponse; }
+    now += 700;
+    return {code: 230001, msg: 'private error', data: {content: 'private body', token: 'private-token'}};
+  });
+  assert.deepEqual(await sendText(client, {receiveId: 'oc_fixture', text: 'private body', idempotencyKey: 'stable'}), {
+    ok: false, idempotency_key: 'stable', status: 'api_error', request_phase: 'send',
+    error_type: 'api_error', elapsed_ms: 700, http_status: 200, code: 230001
+  });
+});
+test('unknown transport codes and error names cannot leak into send diagnostics', async t => {
+  const {client} = httpFixture(t, 'unknown-error', request => {
+    throw Object.assign(new Error('private error text'), {name: 'private error name', code: 'PRIVATE_TOKEN', config: request});
+  });
+  const result = await sendText(client, {receiveId: 'oc_fixture', text: 'private body'});
+  assert.equal(result.status, 'not_sent'); assert.equal(result.request_phase, 'authentication');
+  assert.equal(result.error_type, 'unknown_error'); assert.equal(result.error_code, undefined);
+  assert.ok(Number.isInteger(result.elapsed_ms) && result.elapsed_ms >= 0);
+  assert.ok(!/private/i.test(JSON.stringify(result)));
+});
+test('bot identity preserves safe authentication diagnostics for the startup CLI', async t => {
+  const {client} = httpFixture(t, 'startup-auth-timeout', request => {
+    throw Object.assign(new Error('private credentials'), {code: 'ECONNABORTED', config: request});
+  });
+  await assert.rejects(resolveBotIdentity(config(), client), error => {
+    const details = getHttpDiagnostics(error);
+    assert.equal(details.request_phase, 'authentication');
+    assert.equal(details.error_type, 'timeout'); assert.equal(details.error_code, 'ECONNABORTED');
+    assert.ok(Number.isInteger(details.elapsed_ms) && details.elapsed_ms >= 0);
+    assert.ok(!JSON.stringify({error: error.message, ...details}).includes('private credentials'));
+    return true;
+  });
+});
+test('explicit retry reuses the exact payload/key while a changed message gets a new key', async t => {
+  let sent = 0;
+  const {client, calls} = httpFixture(t, 'manual-retry', request => {
+    if (isAuthentication(request)) return tokenResponse;
+    if (++sent === 1) throw Object.assign(new Error('private timeout'), {code: 'ECONNABORTED', config: request});
+    return {code: 0, data: {message_id: `om_result_${sent}`}};
+  });
+  const operation = {receiveId: 'oc_fixture', receiveIdType: 'chat_id', text: 'Original message'};
+  const first = await sendText(client, operation);
+  assert.equal(first.status, 'delivery_unknown'); assert.equal(sent, 1);
+  const retried = await sendText(client, {...operation, idempotencyKey: first.idempotency_key});
+  assert.equal(retried.ok, true); assert.equal(retried.idempotency_key, first.idempotency_key);
+  const changed = await sendText(client, {...operation, text: 'Changed message'});
+  assert.equal(changed.ok, true); assert.notEqual(changed.idempotency_key, first.idempotency_key);
+  const messageCalls = calls.filter(request => !isAuthentication(request));
+  assert.equal(messageCalls.length, 3);
+  assert.deepEqual(messageCalls[1].data, messageCalls[0].data);
+  assert.deepEqual(messageCalls[1].params, messageCalls[0].params);
+  assert.equal(JSON.parse(messageCalls[2].data).uuid, changed.idempotency_key);
+  assert.equal(JSON.parse(JSON.parse(messageCalls[2].data).content).text, 'Changed message');
 });
 for (const [receiveId, receiveIdType] of [
   ['oc_private_fixture', 'chat_id'], ['oc_group_fixture', 'chat_id'], ['ou_recipient_fixture', 'open_id']
@@ -102,6 +227,21 @@ test('SDK socket supports our domain, public agent and lifecycle callbacks witho
   const s = createSocket(config(), n, {onReady() {}}); t.after(() => s.close({force: true}));
   assert.equal(s.getConnectionStatus().state, 'idle');
   assert.equal(s.agent, n.agent);
+  assert.equal(s.handshakeTimeoutMs, 15000);
+});
+test('WebSocket endpoint discovery keeps its existing 15-second timeout', async t => {
+  const n = createNetwork(); t.after(() => n.close()); const calls = [];
+  n.httpInstance.defaults.adapter = async request => {
+    calls.push(request);
+    return {status: 200, statusText: 'OK', headers: {}, config: request, data: {code: 0, data: {
+      URL: 'wss://socket.example.test/ws?device_id=fixture&service_id=fixture',
+      ClientConfig: {PingInterval: 120, ReconnectCount: 1, ReconnectInterval: 10, ReconnectNonce: 1}
+    }}};
+  };
+  const socket = createSocket(config(), n, {}); t.after(() => socket.close({force: true}));
+  assert.deepEqual(await socket.pullConnectConfig(), {ok: true});
+  assert.equal(calls.length, 1); assert.equal(calls[0].timeout, 15000);
+  assert.equal(socket.getConnectionStatus().state, 'idle');
 });
 function clientWith(response, error) {
   let count = 0;

@@ -75,7 +75,23 @@ Use the destination and content requested by the user, including chats or messag
 
 Keep confirmed mappings and their evidence in the conversation and existing private inbox. If the user requests a separate saved mapping, follow the [runtime storage rules](references/operations.md#runtime-files); do not add destination fields to app configuration or include real IDs, message content, or credentials in reusable skill files.
 
-`inbox` shows message metadata by default; `--show-text` also includes content. Outgoing text can also come from `--stdin` or `--text-file`. Report the returned message ID on success and the error code on failure. For `delivery_unknown`, report that delivery is unconfirmed. If the user requests a retry, preserve the destination, content, and `idempotency_key`.
+`inbox` shows message metadata by default; `--show-text` also includes content. Outgoing text can also come from `--stdin` or `--text-file`. API code 0 with a returned message ID confirms API acceptance, not that the user read the message. Report each requested send's actual result:
+
+- `not_sent` with `request_phase: authentication`: authentication failed before the message API was called in this attempt. This does not resolve an earlier attempt's unknown delivery.
+- `api_error`: report the numeric API code and HTTP status when present.
+- `delivery_unknown`: delivery is unconfirmed; do not claim it failed or automatically resend.
+
+Preserve the CLI's safe `error_type`, allowlisted `error_code`, `request_phase`, and per-request `elapsed_ms` when present. Never expose raw exceptions, request/response dumps, credentials, headers, or message bodies as diagnostics. If a tool approval is pending, rejected, or interrupted before execution, report that tool state separately from Feishu results. An interrupted tool result without execution evidence cannot establish an API timeout or delivery outcome.
+
+Sending never retries automatically. For an authorized retry of the same operation, preserve the exact destination and ID type, text, reply options, and returned `idempotency_key`. A change to the text or destination is a new message and needs a new key; do not add a timestamp or otherwise alter content during a retry. If the original key is unavailable after an uncertain attempt, report the duplicate risk and clarify before resending.
+
+### Diagnose a send timeout
+
+Authentication and send/reply HTTP requests each have a fixed 30-second timeout. There is no configuration key, CLI flag, environment override, adaptive extension, or unbounded retry policy. Authentication may run before the message request, so a command can take more than 30 seconds overall. WebSocket timing is separate.
+
+Diagnose the sending process first: inspect the reported request phase, safe error code, elapsed time, and the sender's authentication/network/proxy conditions. A healthy listener receiving messages does not prove that a separate send command's HTTP requests will succeed. An authentication timeout means no message API call in that attempt; a send/reply timeout leaves delivery unknown.
+
+Consider restarting the listener only with evidence of listener disconnection, an abnormal process, or a confirmed hang. A send timeout alone is not a reason to restart a healthy receiver. Do not send diagnostic probes without authorization, lengthen the fixed timeout automatically, or conclude that a restart repaired sending merely because a later attempt succeeded. See [send troubleshooting](references/operations.md#send-timeouts-and-retries) for evidence and retry rules.
 
 ## Troubleshooting and migration
 

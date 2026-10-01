@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, DEFAULT_STATE, SafeError, ConfigError, loadConfig, initialize, checkConfig, prepareConfig } from './config.mjs';
 import { readInbox } from './messages.mjs';
-import { createNetwork, createClient, sendText } from './transport.mjs';
+import { createNetwork, createClient, sendText, getHttpDiagnostics } from './transport.mjs';
 import { startListener } from './runtime.mjs';
 
 export const HELP = `Feishu Message Server — Node.js 22.18+ (transport only)
@@ -23,6 +23,8 @@ Usage: bash feishu.sh <command> [options]
 Options: --config FILE --brand feishu|lark --state-dir DIR
 Send/reply text: exactly one of --text, --text-file FILE, --stdin
 Optional --idempotency-key KEY for manual retry of the same operation.
+Authentication and message HTTP requests each time out after 30 seconds; no automatic send retry.
+Retry only when authorized with the same destination, text and key. Changed text needs a new key.
 Required config: app_id, app_secret. Default brand: feishu.
 Receive private messages and group messages that @this bot. No automatic reply or task execution.
 `;
@@ -136,7 +138,8 @@ export async function main(argv = process.argv.slice(2)) {
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().then(code => { process.exitCode = code; }).catch(error => {
-    process.stderr.write(JSON.stringify({ok: false, error: error instanceof SafeError ? error.message : 'Operation failed; private error details suppressed'}) + '\n');
+    process.stderr.write(JSON.stringify({ok: false, error: error instanceof SafeError ? error.message : 'Operation failed; private error details suppressed',
+      ...getHttpDiagnostics(error)}) + '\n');
     process.exitCode = 1;
   });
 }

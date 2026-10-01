@@ -115,6 +115,8 @@ REST and WebSocket connections share a ProxyAgent. Supported variables include `
 
 TLS certificate verification remains enabled. An organization CA can be supplied with Node's `NODE_EXTRA_CA_CERTS`. The wrapper disables dependency debug output and uses the SDK's public `agent` and `httpInstance` options. Environment variables configure proxies and the runtime; they are not used to discover app configuration automatically.
 
+Authentication and message API calls share one HTTP instance with a fixed **30,000 ms per-request timeout**. Token acquisition precedes a send/reply when the SDK has no cached token; each request gets its own 30 seconds. The total command duration can therefore exceed 30 seconds. No user-facing timeout setting or automatic extension is provided. The separate WebSocket handshake remains 15 seconds, SDK WebSocket endpoint discovery retains its explicit 15-second HTTP timeout, and listener readiness still waits up to 45 seconds.
+
 ## Results and troubleshooting
 
 | Situation | Action |
@@ -126,11 +128,37 @@ TLS certificate verification remains enabled. An organization CA can be supplied
 | `99991672` | Identify the denied operation. For optional target lookup, offer an exact ID or first-inbound discovery without extra permissions. For a requested receive/send operation, explain its relevant missing permission; change permissions only when authorized |
 | Connected but no confirmed private/group destination | Report the unknown targets during startup and follow [target discovery](#target-discovery-after-startup) |
 | Inbox unavailable or candidates ambiguous | Report that limitation; clarify the target without guessing or sending a probe |
-| `api_error` | Report the numeric API code and HTTP status; follow the official documentation |
-| `delivery_unknown` | Delivery is unconfirmed; preserve the same idempotency key, destination, and content for a retry |
+| `not_sent` / `request_phase: authentication` | Authentication failed before the message request in this attempt. Diagnose the sender; retain the key for an authorized retry |
+| `api_error` | Report the numeric API code, HTTP status, and safe request diagnostics when present; follow the official documentation |
+| `delivery_unknown` | Delivery is unconfirmed. Do not automatically resend; an authorized retry preserves the original key, destination, and content |
+| Tool approval pending, rejected, or interrupted | Report the tool's execution/approval state separately. If execution never began, there is no Feishu result; if execution is uncertain, do not infer delivery or automatically rerun |
 | The execution environment rejects an operation | Report the specific action and returned reason, and follow the environment's normal authorization process |
 
-The SDK manages reconnection. Confirm readiness through `transport_connected` or `transport_reconnected`. Sending does not retry automatically. A successful send requires both API code 0 and a returned message ID.
+The SDK manages listener reconnection. Confirm readiness through `transport_connected` or `transport_reconnected`. Sending does not retry automatically. A successful send requires both API code 0 and a returned message ID; it establishes API acceptance, not that the user read the message.
+
+### Send timeouts and retries
+
+Inspect the sending command's result before changing the listener. Each send/reply command creates its own HTTP client/network; a listener can continue receiving while authentication or a message request from that command times out. Connection readiness and fresh inbox records describe the receive path only.
+
+Failure diagnostics expose a bounded set of fields:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `not_sent` for a confirmed authentication failure before sending in this attempt; `api_error` for an API rejection; `delivery_unknown` when message acceptance cannot be established |
+| `request_phase` | `authentication`, `send`, `reply`, `bot_identity`, `websocket_discovery`, or `unknown`; only report a specific HTTP phase when observed |
+| `elapsed_ms` | Rounded monotonic duration of that HTTP request, excluding earlier authentication; absent if request timing is unavailable |
+| `error_type` | `timeout`, `network_error`, `http_error`, `api_error`, `invalid_response`, or `unknown_error` |
+| `error_code` | An allowlisted transport code such as `ECONNABORTED`, `ETIMEDOUT`, or `ECONNRESET`; arbitrary error strings are suppressed |
+| `http_status` / `code` | Numeric HTTP status and Feishu API code when available; HTTP 200 alone is not send success |
+| `idempotency_key` | The key for this send/reply operation, including failures; retain it for an authorized retry |
+
+The common HTTP interceptors measure requests and retain sanitized metadata. Authentication business errors are captured before SDK wrapping can discard their numeric API code. SDK logging stays silent; do not enable debug output or dump raw errors to diagnose a timeout. Error messages, URLs, headers, tokens, secrets, and response/message bodies are not diagnostic output. Startup authentication/bot-identity failures also retain the safe fields when available.
+
+For example, an illustrative authentication failure can return `status: not_sent`, `request_phase: authentication`, `error_type: timeout`, `error_code: ECONNABORTED`, and `elapsed_ms: 30016`. No message API call occurred in that attempt. A message request that times out after authentication can instead return `status: delivery_unknown`, `request_phase: send`, and `elapsed_ms: 30004`. That duration belongs to the send request, not authentication plus sending. Neither result says that the listener needs a restart. A previous uncertain attempt remains uncertain even if a later authentication attempt is `not_sent`.
+
+Use the observed phase and code to inspect the sender's credentials, selected platform, proxy/network path, or API rejection as appropriate. Do not assume that a transport timeout means invalid credentials or missing permissions. Consider restarting only when the listener itself is disconnected, its process is abnormal, or it is demonstrably stuck; check its current lifecycle evidence first. Receiving normally while a send times out is evidence to continue investigating the send path. A later successful send after a restart does not by itself establish that restarting fixed the problem.
+
+There is no automatic send retry, timeout extension, or retry loop. When the user authorizes retrying the same operation, pass the original `--idempotency-key` and preserve the destination/ID type, exact text, and reply options. Changing the text (including adding a timestamp), destination, or reply operation creates a new message and requires a new key. If an interrupted tool result lost the key and delivery is uncertain, explain the duplicate risk and clarify before another send; do not silently treat it as a new operation. An approval failure before execution is a tool-level blocker, not a Feishu API error. Do not send extra test messages or restart an instance just to obtain a cleaner result.
 
 ## Packaging and migration
 

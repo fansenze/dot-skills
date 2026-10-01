@@ -1,6 +1,7 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import { ProxyAgent } from 'proxy-agent';
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { SafeError } from './config.mjs';
 import { extractMessage } from './messages.mjs';
 
@@ -8,6 +9,45 @@ import { extractMessage } from './messages.mjs';
 // Lifecycle callbacks below are the only source of transport logs.
 export const silentLogger = Object.freeze(Object.fromEntries(
   ['trace', 'debug', 'info', 'warn', 'error'].map(k => [k, () => {}])));
+
+// Keep diagnostics separate from SDK/Axios objects, which can contain secrets.
+const httpDiagnostics = new WeakMap();
+const transportCodes = new Set(['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED',
+  'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE', 'ERR_NETWORK',
+  'ERR_CANCELED', 'ERR_BAD_REQUEST', 'ERR_BAD_RESPONSE', 'ERR_TLS_CERT_ALTNAME_INVALID',
+  'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE']);
+
+export function getHttpDiagnostics(value) { return httpDiagnostics.get(value) ?? {}; }
+function rememberHttpDiagnostics(value, details) {
+  if (value && typeof value === 'object') httpDiagnostics.set(value, Object.freeze(details));
+  return value;
+}
+function responseCodes(response) {
+  return {
+    ...(Number.isInteger(response?.status) && response.status >= 100 && response.status <= 599 ? {http_status: response.status} : {}),
+    ...(Number.isSafeInteger(response?.data?.code) ? {code: response.data.code} : {})
+  };
+}
+function transportFailure(error) {
+  const errorCode = transportCodes.has(error?.code) ? error.code : undefined;
+  const codes = responseCodes(error?.response);
+  const errorType = ['ECONNABORTED', 'ETIMEDOUT'].includes(errorCode) ? 'timeout'
+    : codes.http_status ? 'http_error' : errorCode ? 'network_error' : 'unknown_error';
+  return {error_type: errorType, ...(errorCode ? {error_code: errorCode} : {}), ...codes};
+}
+function requestPhase(request) {
+  let pathname;
+  try { pathname = new URL(request.url, 'https://request.invalid').pathname; }
+  catch { return 'unknown'; }
+  if (pathname === '/open-apis/auth/v3/tenant_access_token/internal') return 'authentication';
+  if (request.method?.toUpperCase() === 'POST') {
+    if (pathname === '/open-apis/im/v1/messages') return 'send';
+    if (/^\/open-apis\/im\/v1\/messages\/[^/]+\/reply$/.test(pathname)) return 'reply';
+  }
+  if (pathname === '/open-apis/bot/v3/info') return 'bot_identity';
+  if (pathname === '/callback/ws/endpoint') return 'websocket_discovery';
+  return 'unknown';
+}
 
 export function createNetwork() {
   if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw new SafeError('TLS verification must remain enabled');
@@ -23,10 +63,33 @@ export function createNetwork() {
   };
   const httpInstance = lark.defaultHttpInstance.create({
     httpAgent: agent, httpsAgent: agent, proxy: false,
-    timeout: 15000, maxRedirects: 0, maxContentLength: 4 * 1024 * 1024
+    timeout: 30000, maxRedirects: 0, maxContentLength: 4 * 1024 * 1024
   });
-  httpInstance.interceptors.response.use(response => response.config.$return_headers
-    ? {data: response.data, headers: response.headers} : response.data);
+  const requests = new WeakMap();
+  httpInstance.interceptors.request.use(request => {
+    requests.set(request, {phase: requestPhase(request), started: performance.now()});
+    return request;
+  });
+  const timing = request => {
+    const recorded = requests.get(request);
+    return recorded ? {request_phase: recorded.phase, elapsed_ms: Math.max(0, Math.round(performance.now() - recorded.started))}
+      : {request_phase: 'unknown'};
+  };
+  httpInstance.interceptors.response.use(response => {
+    const details = {...timing(response.config), ...responseCodes(response)};
+    // Preserve auth business errors before the SDK turns them into plain Errors.
+    if (details.request_phase === 'authentication' &&
+      (response.data?.code !== 0 || typeof response.data?.tenant_access_token !== 'string' || !response.data.tenant_access_token)) {
+      throw rememberHttpDiagnostics(new SafeError('Authentication response did not provide a usable token'), {
+        ...details, error_type: Number.isSafeInteger(response.data?.code) && response.data.code !== 0 ? 'api_error' : 'invalid_response'
+      });
+    }
+    const body = response.config.$return_headers ? {data: response.data, headers: response.headers} : response.data;
+    return rememberHttpDiagnostics(body, details);
+  }, error => {
+    rememberHttpDiagnostics(error, {...timing(error?.config), ...transportFailure(error)});
+    throw error;
+  });
   return {agent, httpInstance, close() {
     agent.destroy(); agent.httpAgent.destroy(); agent.httpsAgent.destroy();
   }};
@@ -42,9 +105,15 @@ export async function resolveBotIdentity(config, client) {
   if (config.bot_open_id) return config;
   let response;
   try { response = await client.request({method: 'GET', url: '/open-apis/bot/v3/info'}); }
-  catch { throw new SafeError('Bot identity lookup failed; check app credentials, bot capability, domain and network'); }
+  catch (error) {
+    throw rememberHttpDiagnostics(new SafeError('Bot identity lookup failed; check app credentials, bot capability, domain and network'),
+      {...transportFailure(error), ...getHttpDiagnostics(error)});
+  }
   if (response?.code !== 0 || typeof response?.bot?.open_id !== 'string' || !response.bot.open_id) {
-    throw new SafeError('Bot identity lookup returned no bot.open_id; check credentials and bot capability');
+    throw rememberHttpDiagnostics(new SafeError('Bot identity lookup returned no bot.open_id; check credentials and bot capability'), {
+      ...getHttpDiagnostics(response), ...responseCodes({data: response}),
+      error_type: Number.isSafeInteger(response?.code) && response.code !== 0 ? 'api_error' : 'invalid_response'
+    });
   }
   config.bot_open_id = response.bot.open_id;
   return config;
@@ -100,12 +169,14 @@ export async function sendText(client, {text, idempotencyKey, receiveId, receive
     if (response?.code === 0 && typeof response?.data?.message_id === 'string' && response.data.message_id) {
       return {ok: true, ...base, message_id: response.data.message_id};
     }
-    return {ok: false, ...base, status: Number.isInteger(response?.code) && response.code !== 0 ? 'api_error' : 'delivery_unknown',
-      ...(Number.isInteger(response?.code) ? {code: response.code} : {})};
+    const apiError = Number.isSafeInteger(response?.code) && response.code !== 0;
+    return {ok: false, ...base, status: apiError ? 'api_error' : 'delivery_unknown',
+      request_phase: messageId !== undefined ? 'reply' : 'send', ...getHttpDiagnostics(response),
+      ...responseCodes({data: response}), error_type: apiError ? 'api_error' : 'invalid_response'};
   } catch (error) {
-    const status = error?.response?.status;
-    return {ok: false, ...base, status: Number.isInteger(status) && status >= 400 && status < 500 ? 'api_error' : 'delivery_unknown',
-      ...(Number.isInteger(status) ? {http_status: status} : {}),
-      ...(Number.isInteger(error?.response?.data?.code) ? {code: error.response.data.code} : {})};
+    const details = {request_phase: 'unknown', ...transportFailure(error), ...getHttpDiagnostics(error)};
+    const status = details.request_phase === 'authentication' ? 'not_sent'
+      : details.http_status >= 400 && details.http_status < 500 ? 'api_error' : 'delivery_unknown';
+    return {ok: false, ...base, status, ...details};
   }
 }

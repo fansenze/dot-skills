@@ -16,6 +16,8 @@ Feishu Message Server defaults to domestic Feishu. Select `lark` explicitly for 
 
 After startup, Dot proactively reports the verified connection state, message receive/send evidence, and whether the relevant private and group destinations are known. A running process does not prove a connection, and a connection does not prove message delivery or identify a recipient. Exact user-supplied IDs, verified history, or official queries with existing permissions can resolve targets; users do not have to message first every time. If a target is unknown and lookup is unavailable, Dot immediately asks for an exact ID or one private message to the bot / one mention in the intended group, then verifies the new inbox records. Ambiguous candidates require clarification. Startup does not trigger test sends, automatic replies, or broader permissions.
 
+Authentication and send/reply HTTP requests each use a fixed 30-second timeout. Failures retain safe request-stage and timing diagnostics. A send timeout is investigated on the sending side; it does not justify restarting a healthy listener. Unknown delivery never triggers automatic resend, and an authorized retry preserves the original destination, text, and idempotency key. See [send troubleshooting](skills/messaging/feishu-message-server/references/operations.md#send-timeouts-and-retries).
+
 See its [operations guide](skills/messaging/feishu-message-server/references/operations.md) for commands and its [validation record](skills/messaging/feishu-message-server/references/validation.md) for tested behavior and coverage limits.
 
 ### Automation
