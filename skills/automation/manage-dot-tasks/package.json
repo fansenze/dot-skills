@@ -1,0 +1,14 @@
+{
+  "name": "manage-dot-tasks-skill",
+  "version": "1.0.0",
+  "private": true,
+  "description": "File-backed task ledger with evidence, acceptance checks, and Markdown views",
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "cli": "node scripts/taskctl.mjs",
+    "validate": "node --check scripts/taskctl.mjs && node --check scripts/package.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "package": "node scripts/package.mjs"
+  }
+}

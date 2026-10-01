@@ -16,6 +16,16 @@ Feishu Message Server defaults to domestic Feishu. Select `lark` explicitly for 
 
 See its [operations guide](skills/messaging/feishu-message-server/references/operations.md) for commands and its [validation record](skills/messaging/feishu-message-server/references/validation.md) for tested behavior and coverage limits.
 
+### Automation
+
+Skills for task coordination and repeatable operational workflows.
+
+| Skill | Directory | What it does | Requirements |
+| --- | --- | --- | --- |
+| [Manage Dot Tasks](skills/automation/manage-dot-tasks/SKILL.md) | [`skills/automation/manage-dot-tasks/`](skills/automation/manage-dot-tasks/) | Maintains a file-backed task ledger with goals, steps, blockers, evidence, acceptance checks, and Markdown list/detail views. | Node.js 22.18+ on Linux/macOS; built-in modules only |
+
+Manage Dot Tasks keeps task data outside the reusable skill. The CLI records observed progress and verified outcomes; it does not schedule work or monitor execution in the background. During assistant-led activation, follow its [first-use workflow](skills/automation/manage-dot-tasks/references/first-use.md) for the authorized platform-memory convention. See the [CLI guide](skills/automation/manage-dot-tasks/references/cli.md) for commands and the [data model](skills/automation/manage-dot-tasks/references/model.md) for state and recovery rules.
+
 ### Category map
 
 Use the following categories as the collection grows. Only categories containing a skill need a directory.
@@ -23,7 +33,7 @@ Use the following categories as the collection grows. Only categories containing
 | Category | Directory | Intended contents | Current contents |
 | --- | --- | --- | --- |
 | Messaging | `skills/messaging/` | Chat integrations, message transport, notifications, and inbox utilities | Feishu Message Server |
-| Automation | `skills/automation/` | Task coordination and repeatable operational workflows | No skills yet |
+| Automation | `skills/automation/` | Task coordination and repeatable operational workflows | Manage Dot Tasks |
 | Documents | `skills/documents/` | Document, spreadsheet, presentation, and report workflows | No skills yet |
 | Development | `skills/development/` | Repository, code review, testing, and developer tooling workflows | No skills yet |
 | Research | `skills/research/` | Information gathering, comparison, analysis, and synthesis | No skills yet |
@@ -37,6 +47,16 @@ dot-skills/
 ├── pnpm-workspace.yaml
 ├── pnpm-lock.yaml
 └── skills/
+    ├── automation/
+    │   └── manage-dot-tasks/
+    │       ├── SKILL.md
+    │       ├── agents/openai.yaml
+    │       ├── assets/
+    │       ├── package.json
+    │       ├── scripts/
+    │       ├── tests/
+    │       ├── references/
+    │       └── ui/
     └── messaging/
         └── feishu-message-server/
             ├── SKILL.md
@@ -69,18 +89,33 @@ pnpm feishu start --config /path/to/temporary/config.yml
 
 The required configuration keys are `app_id` and `app_secret`. Optional keys are `brand` and `bot_open_id`. Stop the listener with Ctrl-C and remove the temporary configuration when it is no longer needed.
 
+For Manage Dot Tasks, the root shortcut forwards options to the CLI. Select a store outside the checkout, and place global options before the command:
+
+```bash
+pnpm tasks --help
+pnpm tasks --store /path/to/task-store init
+pnpm tasks --store /path/to/task-store list --all
+pnpm tasks --store /path/to/task-store render list
+pnpm tasks --store /path/to/task-store doctor
+```
+
+An exported Manage Dot Tasks skill runs directly with `node scripts/taskctl.mjs`; it needs no dependency installation. Its default store paths and `DOT_TASKS_HOME` override are described in `SKILL.md`. CLI initialization prepares local files only; any platform-memory step belongs to the invoking assistant's first-use workflow.
+
 ## Validate and package
 
-Run the shared commands from the repository root. `pnpm check` runs each package's available validation and test scripts. The Feishu skill includes offline tests with mocked SDK responses and a local loopback HTTP fixture:
+Run the shared commands from the repository root. `pnpm check` runs each package's available validation and test scripts. Feishu tests use mocked SDK responses and a local loopback HTTP fixture; task-ledger tests use isolated temporary stores and synthetic compatibility fixtures:
 
 ```bash
 pnpm check
 pnpm package:feishu
+pnpm package:tasks
 ```
 
 The archive is written to `skills/messaging/feishu-message-server/dist/feishu-message-server-node.tgz`. It contains the skill's code, tests, blank configuration template, and documentation. Packaging derives a standalone pnpm lockfile from the shared lock and adds the pinned package-manager version to the exported manifest. This generated lockfile exists only in the archive; no per-skill lockfile is maintained in the repository. Installed dependencies and runtime files stay outside the archive.
 
 After extracting the archive, run `bash feishu.sh setup` from its directory, then follow `SKILL.md`. The wrapper also works inside the monorepo, where `setup` automatically locates the repository root and uses its frozen shared lockfile.
+
+Manage Dot Tasks exports to `dist/manage-dot-tasks.zip` at the repository root. Its deterministic ZIP includes instructions, code, templates, metadata, and synthetic tests. Extract it anywhere, then follow `manage-dot-tasks/SKILL.md`. The archive needs no lockfile because the skill has no third-party dependencies. Validate the extracted copy with `node --test manage-dot-tasks/tests/taskctl.test.mjs`.
 
 ## Add another skill
 

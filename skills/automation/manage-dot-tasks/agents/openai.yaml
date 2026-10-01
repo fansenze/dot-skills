@@ -1,0 +1,13 @@
+interface:
+  display_name: "Task Management"
+  short_description: "Track tasks, evidence, blockers, and verified outcomes"
+  default_prompt: "Use $manage-dot-tasks to initialize the task ledger, remember its usage rules with the platform's existing memory, and track my tasks."
+  icon_small: "assets/icon.svg"
+  icon_large: "assets/icon.svg"
+policy:
+  products:
+  - "chatgpt"
+  - "codex"
+  - "api"
+  - "atlas"
+  allow_implicit_invocation: true

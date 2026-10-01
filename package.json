@@ -9,6 +9,8 @@
     "test": "pnpm -r --if-present run test",
     "check": "pnpm run validate && pnpm run test",
     "feishu": "pnpm --filter feishu-message-server-skill run cli",
-    "package:feishu": "pnpm --filter feishu-message-server-skill run package"
+    "package:feishu": "pnpm --filter feishu-message-server-skill run package",
+    "tasks": "pnpm --filter manage-dot-tasks-skill run cli",
+    "package:tasks": "pnpm --filter manage-dot-tasks-skill run package ../../../dist/manage-dot-tasks.zip"
   }
 }

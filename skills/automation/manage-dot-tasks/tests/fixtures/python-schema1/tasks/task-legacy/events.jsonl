@@ -1,0 +1,6 @@
+{"id": "ev-synthetic-0000", "at": "2026-01-01T00:00:00.123456Z", "kind": "registered", "text": "任务已登记", "source": ""}
+{"id": "ev-synthetic-0001", "at": "2026-01-01T00:01:00.123456Z", "kind": "step", "text": "步骤：Imported completed step（completed）", "source": ""}
+{"id": "ev-synthetic-0002", "at": "2026-01-01T00:02:00.123456Z", "kind": "step", "text": "步骤：Pending old-schema step（queued）", "source": ""}
+{"id": "ev-synthetic-0003", "at": "2026-01-01T00:03:00.123456Z", "kind": "observation", "text": "执行观察：记录为进行中（不代表实时健康）", "source": "Synthetic API observation"}
+{"id": "ev-synthetic-0004", "at": "2026-01-01T00:04:00.123456Z", "kind": "check", "text": "验证 Compatibility：pass", "source": ""}
+{"id": "ev-synthetic-0005", "at": "2026-01-01T00:05:00.123456Z", "kind": "check", "text": "验证 Signature：fail", "source": ""}

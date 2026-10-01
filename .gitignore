@@ -8,9 +8,12 @@ node_modules/
 dist/
 coverage/
 *.tgz
+__pycache__/
+*.py[cod]
 
 # Per-skill runtime files
 .local/
+task-store/
 *.log
 *.log.*
 *.sqlite3

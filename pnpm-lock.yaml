@@ -4,6 +4,7 @@ settings:
   excludeLinksFromLockfile: false
 importers:
   .: {}
+  skills/automation/manage-dot-tasks: {}
   skills/messaging/feishu-message-server:
     dependencies:
       "@larksuiteoapi/node-sdk":
