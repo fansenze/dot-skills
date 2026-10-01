@@ -16,7 +16,7 @@
     "yaml": "2.9.1"
   },
   "files": [
-    "SKILL.md", "agents/", "config.example.yml", "feishu.sh", ".gitignore",
+    "SKILL.md", "agents/", "config.example.yml", "feishu.sh",
     "package-lock.json", "scripts/*.mjs", "tests/*.test.mjs", "references/"
   ]
 }

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { ROOT, SafeError } from './config.mjs';
 
 export const FILES = Object.freeze([
-  'SKILL.md', 'agents/openai.yaml', 'config.example.yml', '.gitignore', 'feishu.sh',
+  'SKILL.md', 'agents/openai.yaml', 'config.example.yml', 'feishu.sh',
   'package.json', 'package-lock.json', 'scripts/config.mjs', 'scripts/messages.mjs',
   'scripts/transport.mjs', 'scripts/runtime.mjs', 'scripts/server.mjs',
   'scripts/package.mjs', 'scripts/validate.mjs', 'tests/server.test.mjs',

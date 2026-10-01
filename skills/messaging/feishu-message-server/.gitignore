@@ -1,8 +1,0 @@
-.local/
-node_modules/
-.cache/
-dist/
-*.sqlite3*
-*.log*
-config.yml
-*.tgz

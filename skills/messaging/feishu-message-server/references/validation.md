@@ -12,8 +12,8 @@ Validation date: 2026-10-01. Runtime: Node.js 22.18.0, npm 10.9.3, and official 
 | Local storage | Deduplication across restarts, transactional writes, failure handling, and existing-database compatibility passed |
 | Sending and replying | Mocked SDK arguments, success, failure, unconfirmed delivery, and idempotency keys passed |
 | Proxies and CLI | Environment proxies, NO_PROXY, calls from another working directory, and shutdown handling passed |
-| Skill validation | Metadata, dependency pins, and all 18 portable files passed |
-| English content | Skill instructions, reference documents, template comments, metadata, and CLI help are in English; no Han characters remain in the 18 portable source files |
+| Skill validation | Metadata, dependency pins, and all 17 portable files passed |
+| English content | Skill instructions, reference documents, template comments, metadata, and CLI help are in English; no Han characters remain in the 17 portable source files |
 | Migration | An earlier archive was extracted into a new directory; all 82 locked packages installed offline, and validation and startup help passed |
 | Updated archive | Extracted again into a temporary directory using the already installed locked dependencies; file equality, validation, English help, YAML/JSON preparation, missing-key checks, Feishu/Lark selection, and calls from another working directory passed |
 | Local-data exclusion | Portable files exclude local configuration values, logs, inbox records, and original machine paths |
