@@ -11,6 +11,8 @@
     "feishu": "pnpm --filter feishu-message-server-skill run cli",
     "package:feishu": "pnpm --filter feishu-message-server-skill run package",
     "tasks": "pnpm --filter manage-dot-tasks-skill run cli",
-    "package:tasks": "pnpm --filter manage-dot-tasks-skill run package ../../../dist/manage-dot-tasks.zip"
+    "package:tasks": "pnpm --filter manage-dot-tasks-skill run package ../../../dist/manage-dot-tasks.zip",
+    "transfer": "pnpm --filter transfer-local-files-to-dot-skill run cli",
+    "package:transfer": "pnpm --filter transfer-local-files-to-dot-skill run package ../../../dist/transfer-local-files-to-dot.zip"
   }
 }

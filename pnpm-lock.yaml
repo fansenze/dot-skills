@@ -5,6 +5,7 @@ settings:
 importers:
   .: {}
   skills/automation/manage-dot-tasks: {}
+  skills/files/transfer-local-files-to-dot: {}
   skills/messaging/feishu-message-server:
     dependencies:
       "@larksuiteoapi/node-sdk":

@@ -26,6 +26,16 @@ Skills for task coordination and repeatable operational workflows.
 
 Manage Dot Tasks keeps task data outside the reusable skill. The CLI records observed progress and verified outcomes; it does not schedule work or monitor execution in the background. During assistant-led activation, follow its [first-use workflow](skills/automation/manage-dot-tasks/references/first-use.md) for the authorized platform-memory convention. See the [CLI guide](skills/automation/manage-dot-tasks/references/cli.md) for commands and the [data model](skills/automation/manage-dot-tasks/references/model.md) for state and recovery rules.
 
+### Files
+
+Skills for moving explicitly selected files between the user's connected computer and Dot.
+
+| Skill | Directory | What it does | Requirements |
+| --- | --- | --- | --- |
+| [Transfer Local Files to dot](skills/files/transfer-local-files-to-dot/SKILL.md) | [`skills/files/transfer-local-files-to-dot/`](skills/files/transfer-local-files-to-dot/) | Uses official ChatGPT Library transport with a local producer and Dot consumer; preserves opaque payload bytes and verifies archive and file hashes. | Dot orchestration, a connected computer, ChatGPT Library; Node.js 22.18+ for the filesystem CLI |
+
+The transfer skill does not view, parse, scan, log, or modify file bodies. Scope and sensitive-data decisions use metadata, the user's description, and existing context. Its Node CLI only packages and verifies bytes; Dot owns delegation, Library transport, and final consumer acceptance. See the [CLI guide](skills/files/transfer-local-files-to-dot/references/cli.md), [handoff contract](skills/files/transfer-local-files-to-dot/references/handoff.md), and [validation record](skills/files/transfer-local-files-to-dot/references/validation.md).
+
 ### Category map
 
 Use the following categories as the collection grows. Only categories containing a skill need a directory.
@@ -34,6 +44,7 @@ Use the following categories as the collection grows. Only categories containing
 | --- | --- | --- | --- |
 | Messaging | `skills/messaging/` | Chat integrations, message transport, notifications, and inbox utilities | Feishu Message Server |
 | Automation | `skills/automation/` | Task coordination and repeatable operational workflows | Manage Dot Tasks |
+| Files | `skills/files/` | Authorized file movement, packaging, and integrity verification | Transfer Local Files to dot |
 | Documents | `skills/documents/` | Document, spreadsheet, presentation, and report workflows | No skills yet |
 | Development | `skills/development/` | Repository, code review, testing, and developer tooling workflows | No skills yet |
 | Research | `skills/research/` | Information gathering, comparison, analysis, and synthesis | No skills yet |
@@ -57,6 +68,15 @@ dot-skills/
     │       ├── tests/
     │       ├── references/
     │       └── ui/
+    ├── files/
+    │   └── transfer-local-files-to-dot/
+    │       ├── SKILL.md
+    │       ├── agents/openai.yaml
+    │       ├── assets/
+    │       ├── package.json
+    │       ├── scripts/
+    │       ├── tests/
+    │       └── references/
     └── messaging/
         └── feishu-message-server/
             ├── SKILL.md
@@ -101,21 +121,33 @@ pnpm tasks --store /path/to/task-store doctor
 
 An exported Manage Dot Tasks skill runs directly with `node scripts/taskctl.mjs`; it needs no dependency installation. Its default store paths and `DOT_TASKS_HOME` override are described in `SKILL.md`. CLI initialization prepares local files only; any platform-memory step belongs to the invoking assistant's first-use workflow.
 
+For Transfer Local Files to dot, read its skill instructions in Dot before selecting the connected computer and source. The repository shortcut exposes the filesystem helper:
+
+```bash
+pnpm transfer --help
+pnpm transfer pack --source /absolute/authorized/source --output /absolute/existing/parent/new-package
+```
+
+The output directory must be new and outside the selected source. These commands create local bytes and metadata only. The invoking Dot task uses official Library transport and reports success only after its consumer verifies the transferred bytes. An exported skill uses `node scripts/transfer.mjs` directly, with no dependency installation.
+
 ## Validate and package
 
-Run the shared commands from the repository root. `pnpm check` runs each package's available validation and test scripts. Feishu tests use mocked SDK responses and a local loopback HTTP fixture; task-ledger tests use isolated temporary stores and synthetic compatibility fixtures:
+Run the shared commands from the repository root. `pnpm check` runs each package's available validation and test scripts. Feishu tests use mocked SDK responses and a local loopback HTTP fixture; task-ledger tests use isolated temporary stores and synthetic compatibility fixtures; transfer tests use synthetic opaque payloads and malformed archives:
 
 ```bash
 pnpm check
 pnpm package:feishu
 pnpm package:tasks
+pnpm package:transfer
 ```
 
-The archive is written to `skills/messaging/feishu-message-server/dist/feishu-message-server-node.tgz`. It contains the skill's code, tests, blank configuration template, and documentation. Packaging derives a standalone pnpm lockfile from the shared lock and adds the pinned package-manager version to the exported manifest. This generated lockfile exists only in the archive; no per-skill lockfile is maintained in the repository. Installed dependencies and runtime files stay outside the archive.
+Feishu Message Server exports to `skills/messaging/feishu-message-server/dist/feishu-message-server-node.tgz`. It contains the skill's code, tests, blank configuration template, and documentation. Packaging derives a standalone pnpm lockfile from the shared lock and adds the pinned package-manager version to the exported manifest. This generated lockfile exists only in the archive; no per-skill lockfile is maintained in the repository. Installed dependencies and runtime files stay outside the archive.
 
 After extracting the archive, run `bash feishu.sh setup` from its directory, then follow `SKILL.md`. The wrapper also works inside the monorepo, where `setup` automatically locates the repository root and uses its frozen shared lockfile.
 
 Manage Dot Tasks exports to `dist/manage-dot-tasks.zip` at the repository root. Its deterministic ZIP includes instructions, code, templates, metadata, and synthetic tests. Extract it anywhere, then follow `manage-dot-tasks/SKILL.md`. The archive needs no lockfile because the skill has no third-party dependencies. Validate the extracted copy with `node --test manage-dot-tasks/tests/taskctl.test.mjs`.
+
+Transfer Local Files to dot exports to `dist/transfer-local-files-to-dot.zip`. Its deterministic ZIP contains an explicit allowlist of reusable skill files, including synthetic tests and the exporter. It excludes user payloads, receipts, temporary Library helpers, and runtime files. Extract it into a separate directory, then run `node transfer-local-files-to-dot/scripts/validate.mjs` and `node --test transfer-local-files-to-dot/tests/*.test.mjs`. It needs no standalone lockfile or dependency installation. Packaging tests do not establish a successful transfer between computers.
 
 ## Add another skill
 
