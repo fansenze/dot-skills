@@ -12,7 +12,7 @@ Skills for receiving, storing, sending, and replying to messages across communic
 | --- | --- | --- | --- |
 | [Feishu Message Server](skills/messaging/feishu-message-server/SKILL.md) | [`skills/messaging/feishu-message-server/`](skills/messaging/feishu-message-server/) | Runs a Feishu/Lark long-connection listener; stores private messages and group messages mentioning the bot; sends or replies with text when requested. Incoming messages do not automatically trigger tasks or replies. | Node.js 22.18+, pnpm 11.27.0 |
 
-Feishu Message Server defaults to domestic Feishu. Select `lark` explicitly for the international platform. It accepts YAML or JSON configuration and provides temporary configuration preparation, missing-key checks, a local inbox, and a portable archive command.
+Feishu Message Server defaults to domestic Feishu. Select `lark` explicitly for the international platform. It accepts YAML or JSON configuration and starts the server as soon as setup prepares the configuration. When the user selects a configuration file on their computer for a server on Dot, it installs and invokes Transfer Local Files to dot first, then uses the verified Dot-local file. It also provides missing-key diagnostics, a local inbox, and a portable archive command.
 
 See its [operations guide](skills/messaging/feishu-message-server/references/operations.md) for commands and its [validation record](skills/messaging/feishu-message-server/references/validation.md) for tested behavior and coverage limits.
 
@@ -102,8 +102,7 @@ Use Node.js 22.18+ and pnpm 11.27.0. From the repository root, install the share
 ```bash
 pnpm install --frozen-lockfile
 pnpm feishu prepare --config /path/to/config.yml
-# Use the config path returned by prepare:
-pnpm feishu check --config /path/to/temporary/config.yml
+# Dot immediately uses the config path returned by prepare:
 pnpm feishu start --config /path/to/temporary/config.yml
 ```
 

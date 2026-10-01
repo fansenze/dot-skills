@@ -2,19 +2,19 @@
 
 ## Configuration workflow
 
-Accept a YAML/JSON file or a configuration object during the skill interaction. Prepare a temporary file in the actual execution environment, then pass its returned path to the scripts.
+Accept a YAML/JSON file or a configuration object during the skill interaction. When the selected file is on the user's computer and the server will run on dot, install and invoke this repository's `skills/files/transfer-local-files-to-dot` skill first, following the [local configuration workflow](../SKILL.md#local-configuration-files-for-dot). Wait for `materialized_and_verified` and use its returned dot-local source path. Prepare a temporary file in the actual execution environment, then immediately start the server with its returned path.
 
 - Existing file: `prepare --config FILE` copies it into the current environment's temporary directory.
 - Values supplied during the interaction: pass them through standard input to `prepare --stdin-json` to write a temporary JSON file.
 - Partial existing file: `prepare --config FILE --stdin-json` merges the additional values into a temporary file.
 
-Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. If keys are missing, ask only for the names in `missing`. The source file is not overwritten.
+Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. Immediately run `start --config` with that path, or reuse a matching running instance. Setup and configuration include startup unless the user explicitly requests preparation without starting. If keys are missing, ask only for the names in `missing`, complete preparation, and continue directly to startup. The source file is not overwritten.
 
 The supported fields are `app_id`, `app_secret`, `brand`, and `bot_open_id`. The first two are required. The default brand is `feishu`. Newly generated configurations contain only the supported fields that are needed; the default brand can be omitted.
 
 Use `--config` with the returned temporary path for subsequent commands. Omitting the path retains compatibility with `.local/config.yml` inside the skill. A command-line `--brand` overrides the file's brand. Existing field aliases remain supported.
 
-`check` checks only for missing configuration and returns the success status or missing key names. An absent, null, empty, or whitespace-only required value is considered missing.
+`prepare` already reports missing required keys, so the normal workflow does not run a separate `check` before or after it. `check` remains available for explicit diagnostics and returns the success status or missing key names. An absent, null, empty, or whitespace-only required value is considered missing. Tests, packaging, and test messages are not setup prerequisites.
 
 This long-connection implementation does not use `verification_token`, `encrypt_key`, `tenant_key`, or `allowed_chat_ids`; these fields are ignored if present in an older file. Do not add app, tenant, sender, chat, or mention-placeholder filters unless the user requests them.
 
@@ -35,7 +35,7 @@ Temporary files use the current execution environment's system temporary directo
 | `validate` | Check skill metadata, dependency versions, and portable files |
 | `package` | Create an archive from a fixed file manifest |
 
-`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. The only other external network operation is `setup` downloading dependencies. The running server does not expose a local HTTP interface.
+`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. Within the Feishu CLI, the only other external network operation is `setup` downloading dependencies. Importing a local configuration additionally uses the transfer skill's official ChatGPT Library transport. The running server does not expose a local HTTP interface.
 
 ## Feishu app settings
 
@@ -93,7 +93,7 @@ The SDK manages reconnection. Confirm readiness through `transport_connected` or
 
 Run `bash feishu.sh package` from the skill directory, or `pnpm package:feishu` from the repository root. If the output file already exists, choose another output filename. The archive contains code, tests, a blank configuration template, documentation, and a generated standalone pnpm lockfile. Packaging selects this skill's importer from the shared lockfile and preserves its dependency resolutions; the exported manifest also receives the root's pinned pnpm version. It excludes local configuration, inbox data, logs, caches, and node_modules.
 
-Copy the archive to another computer, extract it, and run `setup` from the skill directory. Use the skill interaction or an existing file with `prepare`, then use the returned path for `check` and `start`.
+Copy the archive to another computer, extract it, and run `setup` from the skill directory. Use the skill interaction or an existing file with `prepare`, then immediately use the returned path for `start`. The transfer skill is a separate installation when a user-selected configuration must be imported to dot.
 
 In a repository checkout, `setup` locates the root workspace automatically. It also accepts pnpm install options, for example `setup --offline` when the needed packages are already cached. Copy the generated archive when moving only this skill; copying its raw source folder alone does not include the repository's shared lockfile.
 
