@@ -2,7 +2,7 @@
 
 ## Configuration workflow
 
-Accept a YAML/JSON file or a configuration object during the skill interaction. When the selected file is on the user's computer and the server will run on dot, install and invoke this repository's `skills/files/transfer-local-files-to-dot` skill first, following the [local configuration workflow](../SKILL.md#local-configuration-files-for-dot). Wait for `materialized_and_verified` and use its returned dot-local source path. Prepare a temporary file in the actual execution environment, then immediately start the server with its returned path.
+Follow the [ordered configuration and startup workflow](../SKILL.md#configuration-and-startup). When importing a local file to dot, complete the [configuration handoff](../SKILL.md#local-configuration-files-for-dot) before running the commands below.
 
 - Existing file: `prepare --config FILE` copies it into the current environment's temporary directory.
 - Values supplied during the interaction: pass them through standard input to `prepare --stdin-json` to write a temporary JSON file.
@@ -164,7 +164,7 @@ There is no automatic send retry, timeout extension, or retry loop. When the use
 
 Run `bash feishu.sh package` from the skill directory, or `pnpm package:feishu` from the repository root. If the output file already exists, choose another output filename. The archive contains code, tests, a blank configuration template, documentation, and a generated standalone pnpm lockfile. Packaging selects this skill's importer from the shared lockfile and preserves its dependency resolutions; the exported manifest also receives the root's pinned pnpm version. It excludes local configuration, inbox data, logs, caches, and node_modules.
 
-Copy the archive to another computer, extract it, and run `setup` from the skill directory. Use the skill interaction or an existing file with `prepare`, then immediately use the returned path for `start`. The transfer skill is a separate installation when a user-selected configuration must be imported to dot.
+Copy the archive to another computer, extract it, and follow the [configuration workflow](#configuration-workflow).
 
 In a repository checkout, `setup` locates the root workspace automatically. It also accepts pnpm install options, for example `setup --offline` when the needed packages are already cached. Copy the generated archive when moving only this skill; copying its raw source folder alone does not include the repository's shared lockfile.
 
