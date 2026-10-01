@@ -1,0 +1,6 @@
+packages:
+  - 'skills/*/*'
+
+sharedWorkspaceLockfile: true
+storeDir: .cache/pnpm-store
+ignoreScripts: true

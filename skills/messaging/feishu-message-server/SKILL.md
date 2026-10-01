@@ -7,13 +7,13 @@ description: Configure and run a local Node.js Feishu message server. Receive pr
 
 Complete the user's requested configuration, startup, inbox inspection, or messaging operation with the bundled scripts. The server stores incoming messages without automatically executing tasks or replying.
 
-Run the examples from this skill directory. Requirements: Node.js 22.18+ and npm. Supported environments: macOS, Linux, and Windows through WSL.
+Run the examples from this skill directory. Requirements: Node.js 22.18+ and pnpm 11.27.0. Use a repository checkout or an extracted portable archive so its pnpm lockfile is available. Supported environments: macOS, Linux, and Windows through WSL.
 
 ## Configuration and startup
 
 Check for missing configuration whenever this skill is invoked. Accept a YAML/JSON file or values provided during the skill interaction. Run the commands for the user; manual terminal input is not required.
 
-1. Reuse an available runtime configuration already prepared in this conversation. Otherwise, use the user-selected file or the existing `.local/config.yml`. Run `bash feishu.sh setup` if dependencies are missing.
+1. Reuse an available runtime configuration already prepared in this conversation. Otherwise, use the user-selected file or the existing `.local/config.yml`. Run `bash feishu.sh setup` if dependencies are missing. In a repository checkout, it installs from the root shared lockfile; an exported archive uses its generated standalone lockfile.
 2. For an existing source file, verify that it is readable in the environment where the scripts will run, then run `check --config SOURCE`. If the file is in another environment, copy it through that environment's supported file-transfer workflow first. A remote path alone does not establish local availability.
 3. If no required keys are missing, run `prepare --config SOURCE`. The script copies the file into the current execution environment's temporary directory. Keep the returned `config` path.
 4. Without a source file, pass the configuration object supplied by the user to `prepare --stdin-json` through standard input. Pass `{}` if no values are available yet. If the result contains `missing`, ask only for those key names, for example: "Please provide app_id and app_secret." Do not append descriptions of the keys. Once the values are available, call `prepare` again to write the temporary file.
@@ -60,6 +60,6 @@ bash feishu.sh test
 bash feishu.sh package
 ```
 
-To migrate, copy `dist/feishu-message-server-node.tgz`, extract it, run `setup`, and follow the configuration workflow above before starting. The archive contains code, templates, and documentation. Local configuration, logs, inbox data, and installed dependencies are excluded.
+To migrate, create and copy `dist/feishu-message-server-node.tgz`, extract it, run `setup`, and follow the configuration workflow above before starting. The archive includes code, templates, documentation, and a standalone pnpm lockfile derived from the shared repository lock. Local configuration, logs, inbox data, and installed dependencies are excluded.
 
 [Operations](references/operations.md) covers network behavior, file locations, platform permissions, and troubleshooting. [Validation](references/validation.md) records completed checks and remaining coverage limits.

@@ -1,10 +1,10 @@
 # Validation record
 
-Validation date: 2026-10-01. Runtime: Node.js 22.18.0, npm 10.9.3, and official Node SDK 1.74.0.
+Validation date: 2026-10-01. Current runtime: Node.js 22.18.0, pnpm 11.27.0, and official Node SDK 1.74.0. Earlier migration checks used npm 10.9.3.
 
 | Area | Result |
 | --- | --- |
-| Automated tests | 63 passed with test configuration, mocked SDK responses, and a local loopback HTTP fixture |
+| Automated tests | 65 passed through the root `pnpm check` command with test configuration, mocked SDK responses, and a local loopback HTTP fixture |
 | Configuration initialization | Required and optional fields, default Feishu, explicit Lark, field precedence, and existing-file handling passed |
 | Temporary configuration | YAML/JSON copying, values supplied through stdin, completing missing fields, preserving the source, and startup with temporary configuration passed |
 | Missing-configuration checks | Results contain only status and missing key names; YAML/JSON, empty values, aliases, and calls from another working directory passed |
@@ -12,10 +12,12 @@ Validation date: 2026-10-01. Runtime: Node.js 22.18.0, npm 10.9.3, and official 
 | Local storage | Deduplication across restarts, transactional writes, failure handling, and existing-database compatibility passed |
 | Sending and replying | Mocked SDK arguments, success, failure, unconfirmed delivery, and idempotency keys passed |
 | Proxies and CLI | Environment proxies, NO_PROXY, calls from another working directory, and shutdown handling passed |
-| Skill validation | Metadata, dependency pins, and all 17 portable files passed |
-| English content | Skill instructions, reference documents, template comments, metadata, and CLI help are in English; no Han characters remain in the 17 portable source files |
+| Skill validation | Metadata, dependency pins, the shared lockfile importer, and all 17 skill source files passed; the standalone archive contains 18 files including its generated lockfile |
+| English content | Skill instructions, reference documents, template comments, metadata, and CLI help are in English; no Han characters remain in the skill source files |
 | Migration | An earlier archive was extracted into a new directory; all 82 locked packages installed offline, and validation and startup help passed |
 | Updated archive | Extracted again into a temporary directory using the already installed locked dependencies; file equality, validation, English help, YAML/JSON preparation, missing-key checks, Feishu/Lark selection, and calls from another working directory passed |
+| pnpm monorepo | One root lockfile covers two workspace projects; all 78 unique dependency versions match the previous npm lockfile; a frozen root install and wrapper setup from another working directory passed |
+| Standalone pnpm archive | Generated a single-importer lockfile, installed all 78 packages offline into a fresh directory, and verified validation, CLI help, configuration preparation, missing-key checks, Feishu/Lark selection, and an unchanged frozen lockfile |
 | Local-data exclusion | Portable files exclude local configuration values, logs, inbox records, and original machine paths |
 
 ## Live verification
@@ -36,3 +38,5 @@ The reply endpoint has passed simulated tests but has not received a separate li
 The current configuration entry point is `prepare`: copy or generate a temporary configuration in the actual execution environment, then use its returned path with `check` and `start`. This workflow was verified with simulated configuration, and the existing local configuration passed the updated `check`. No additional live messages were sent and the running listener was not restarted for these configuration changes.
 
 The English-content revision also fixed entry-point detection through symlinked directories, including macOS temporary-directory aliases. The full suite passed after adding a regression covering CLI help, missing configuration, and packaging through a directory symlink. The final archive was rebuilt and its complete file manifest and contents were compared with the source. No additional live messages or listener restarts were used for this revision.
+
+The pnpm migration retained the direct and transitive package versions, removed the per-skill npm lockfile, and added root workspace commands. Runtime message handling was unchanged. Its verification used local fixtures and an offline standalone installation; no additional Feishu authentication or messages were needed.

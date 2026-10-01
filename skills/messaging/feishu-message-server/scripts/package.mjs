@@ -4,14 +4,28 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { ROOT, SafeError } from './config.mjs';
+import { parse, stringify } from 'yaml';
+import { findProject } from './project.mjs';
 
 export const FILES = Object.freeze([
   'SKILL.md', 'agents/openai.yaml', 'config.example.yml', 'feishu.sh',
-  'package.json', 'package-lock.json', 'scripts/config.mjs', 'scripts/messages.mjs',
+  'package.json', 'scripts/project.mjs', 'scripts/config.mjs', 'scripts/messages.mjs',
   'scripts/transport.mjs', 'scripts/runtime.mjs', 'scripts/server.mjs',
   'scripts/package.mjs', 'scripts/validate.mjs', 'tests/server.test.mjs',
   'tests/transport.test.mjs', 'references/operations.md', 'references/validation.md'
 ]);
+export const ARCHIVE_FILES = Object.freeze([...FILES, 'pnpm-lock.yaml']);
+
+export function portableMetadata() {
+  const project = findProject();
+  const lock = parse(fs.readFileSync(project.lockfile, 'utf8'));
+  const importer = lock.importers?.[project.importer];
+  if (!importer || !/^pnpm@\d+\.\d+\.\d+$/.test(project.packageManager ?? '')) {
+    throw new SafeError('The shared pnpm lockfile or packageManager does not match this skill');
+  }
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  return {pkg: {...pkg, packageManager: project.packageManager}, lock: {...lock, importers: {'.': importer}}};
+}
 
 export function makePackage(destination = path.join(ROOT, 'dist', 'feishu-message-server-node.tgz')) {
   const target = path.resolve(destination);
@@ -27,6 +41,9 @@ export function makePackage(destination = path.join(ROOT, 'dist', 'feishu-messag
       fs.copyFileSync(source, output, fs.constants.COPYFILE_EXCL);
       fs.chmodSync(output, name === 'feishu.sh' ? 0o755 : 0o644);
     }
+    const metadata = portableMetadata();
+    fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify(metadata.pkg, null, 2) + '\n', {mode: 0o644});
+    fs.writeFileSync(path.join(folder, 'pnpm-lock.yaml'), stringify(metadata.lock), {mode: 0o644});
     const result = spawnSync('tar', ['-czf', target, '-C', staging, 'feishu-message-server'], {stdio: 'pipe', shell: false});
     if (result.status !== 0) { fs.rmSync(target, {force: true}); throw new SafeError('Packaging failed; tar is required'); }
     return target;
@@ -34,6 +51,6 @@ export function makePackage(destination = path.join(ROOT, 'dist', 'feishu-messag
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { console.log(JSON.stringify({ok: true, archive: makePackage(process.argv[2]), files: FILES.length})); }
+  try { console.log(JSON.stringify({ok: true, archive: makePackage(process.argv[2]), files: ARCHIVE_FILES.length})); }
   catch (error) { console.error(JSON.stringify({ok: false, error: error instanceof SafeError ? error.message : 'Packaging failed'})); process.exitCode = 1; }
 }

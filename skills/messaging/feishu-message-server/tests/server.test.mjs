@@ -8,7 +8,8 @@ import { ROOT, fromMapping, initialize, loadConfig, checkConfig, prepareConfig }
 import { Inbox, readInbox, extractMessage } from '../scripts/messages.mjs';
 import { createDispatcher } from '../scripts/transport.mjs';
 import { acquireLock, createLog, startListener } from '../scripts/runtime.mjs';
-import { FILES, makePackage } from '../scripts/package.mjs';
+import { ARCHIVE_FILES, makePackage, portableMetadata } from '../scripts/package.mjs';
+import { findProject } from '../scripts/project.mjs';
 
 const input = {app_id: 'cli_0000000000000000', app_secret: 'test-secret-only', bot_open_id: 'ou_test_bot'};
 const config = () => fromMapping(input);
@@ -271,7 +272,7 @@ test('CLI and packaging work through a directory symlink', t => {
   assert.equal(missing.status, 1);
   assert.deepEqual(JSON.parse(missing.stdout), {ok: false, missing: ['app_id', 'app_secret']});
   const archive = path.join(dir, 'portable.tgz'), packaged = run(['package', archive]);
-  assert.equal(packaged.status, 0); assert.equal(JSON.parse(packaged.stdout).files, FILES.length);
+  assert.equal(packaged.status, 0); assert.equal(JSON.parse(packaged.stdout).files, ARCHIVE_FILES.length);
   assert.ok(fs.statSync(archive).size > 0);
 });
 test('CLI init stdin, offline check, Lark override, and missing-config diagnostics', t => {
@@ -295,7 +296,25 @@ test('portable archive includes exact allowlist and excludes all local data/runt
   const list = spawnSync('tar', ['-tzf', archive], {encoding: 'utf8'});
   assert.equal(list.status, 0);
   const files = list.stdout.trim().split('\n').filter(s => !s.endsWith('/')).map(s => s.replace(/^feishu-message-server\//, '')).sort();
-  assert.deepEqual(files, [...FILES].sort());
+  assert.deepEqual(files, [...ARCHIVE_FILES].sort());
   assert.ok(!list.stdout.includes('.local/')); assert.ok(!list.stdout.includes('node_modules/'));
   assert.ok(!list.stdout.includes('.py')); assert.ok(!list.stdout.includes('feishu-config.yml'));
+  assert.ok(!list.stdout.includes('package-lock.json'));
+});
+test('portable metadata retains the skill resolutions as one standalone importer', () => {
+  const metadata = portableMetadata();
+  assert.deepEqual(Object.keys(metadata.lock.importers), ['.']);
+  assert.equal(metadata.pkg.packageManager, findProject().packageManager);
+  for (const [name, version] of Object.entries(metadata.pkg.dependencies)) {
+    assert.equal(metadata.lock.importers['.'].dependencies[name].specifier, version);
+  }
+});
+test('project discovery accepts a standalone export and reports a missing lockfile', t => {
+  const directory = temporary(t);
+  fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify({packageManager: 'pnpm@11.27.0'}));
+  assert.throws(() => findProject(directory), /pnpm-lock.yaml is missing/);
+  fs.writeFileSync(path.join(directory, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
+  const project = findProject(directory);
+  assert.equal(project.directory, fs.realpathSync(directory));
+  assert.equal(project.importer, '.');
 });

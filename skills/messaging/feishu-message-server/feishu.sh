@@ -6,13 +6,18 @@ FEISHU_NODE="${FEISHU_NODE:-node}"
 # Dependency debug output can contain signed URLs or authorization headers.
 unset DEBUG NODE_DEBUG
 if ! command -v "$FEISHU_NODE" >/dev/null 2>&1; then
-  printf '%s\n' 'Node.js is missing. Install Node.js 22.18+ and npm, then run feishu.sh setup.' >&2
+  printf '%s\n' 'Node.js is missing. Install Node.js 22.18+ and pnpm 11.27.0, then run feishu.sh setup.' >&2
   exit 2
 fi
 "$FEISHU_NODE" -e 'const [a,b]=process.versions.node.split(".").map(Number); if(a<22 || (a===22&&b<18)){console.error("Node.js 22.18+ is required");process.exit(2)}'
 if [[ "${1:-}" == setup ]]; then
-  cd -- "$FEISHU_ROOT"
-  exec npm ci --ignore-scripts --no-audit --no-fund --cache "$FEISHU_ROOT/.cache/npm"
+  if ! command -v pnpm >/dev/null 2>&1; then
+    printf '%s\n' 'pnpm is missing. Install pnpm 11.27.0, then run feishu.sh setup.' >&2
+    exit 2
+  fi
+  FEISHU_PROJECT="$("$FEISHU_NODE" "$FEISHU_ROOT/scripts/project.mjs")"
+  cd -- "$FEISHU_PROJECT"
+  exec pnpm install --frozen-lockfile --ignore-scripts --store-dir "$FEISHU_PROJECT/.cache/pnpm-store" "${@:2}"
 fi
 if [[ ! -d "$FEISHU_ROOT/node_modules/@larksuiteoapi/node-sdk" || ! -d "$FEISHU_ROOT/node_modules/yaml" || ! -d "$FEISHU_ROOT/node_modules/proxy-agent" ]]; then
   printf '%s\n' 'Node dependencies are missing. Run: bash /path/to/feishu-message-server/feishu.sh setup' >&2

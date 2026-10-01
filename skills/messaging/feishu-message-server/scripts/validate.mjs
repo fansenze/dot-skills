@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { parse } from 'yaml';
 import { ROOT } from './config.mjs';
 import { FILES } from './package.mjs';
+import { findProject } from './project.mjs';
 
 const skill = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf8');
 const match = skill.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
@@ -20,11 +21,17 @@ assert.ok(metadata.interface.short_description.length >= 25 && metadata.interfac
 const example = parse(fs.readFileSync(path.join(ROOT, 'config.example.yml'), 'utf8'));
 assert.deepEqual(example, {app_id: '', app_secret: ''});
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json')));
-const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json')));
-assert.deepEqual(pkg.dependencies, lock.packages[''].dependencies);
+const project = findProject();
+assert.match(project.packageManager, /^pnpm@\d+\.\d+\.\d+$/);
+const lock = parse(fs.readFileSync(project.lockfile, 'utf8'));
+const importer = lock.importers?.[project.importer];
+assert.ok(importer, 'The pnpm lockfile must include this skill');
+assert.deepEqual(Object.keys(pkg.dependencies).sort(), Object.keys(importer.dependencies).sort());
 for (const [name, version] of Object.entries(pkg.dependencies)) {
   assert.match(version, /^\d+\.\d+\.\d+$/);
-  assert.equal(lock.packages[`node_modules/${name}`].version, version);
+  assert.equal(importer.dependencies[name].specifier, version);
+  assert.equal(importer.dependencies[name].version.split('(')[0], version);
+  assert.ok(lock.packages[`${name}@${version}`]);
 }
 for (const name of FILES) {
   assert.ok(fs.lstatSync(path.join(ROOT, name)).isFile(), `Missing or linked: ${name}`);

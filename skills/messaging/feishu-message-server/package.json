@@ -6,9 +6,11 @@
   "type": "module",
   "engines": { "node": ">=22.18.0" },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning scripts/server.mjs start",
+    "cli": "bash feishu.sh",
+    "start": "bash feishu.sh start",
     "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.mjs",
-    "validate": "node scripts/validate.mjs"
+    "validate": "node scripts/validate.mjs",
+    "package": "bash feishu.sh package"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.74.0",
@@ -17,6 +19,6 @@
   },
   "files": [
     "SKILL.md", "agents/", "config.example.yml", "feishu.sh",
-    "package-lock.json", "scripts/*.mjs", "tests/*.test.mjs", "references/"
+    "scripts/*.mjs", "tests/*.test.mjs", "references/"
   ]
 }

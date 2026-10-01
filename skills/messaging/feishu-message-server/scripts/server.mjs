@@ -11,7 +11,7 @@ import { startListener } from './runtime.mjs';
 
 export const HELP = `Feishu Message Server — Node.js 22.18+ (transport only)
 Usage: bash feishu.sh <command> [options]
-  setup                         Install pinned Node dependencies (npm ci)
+  setup                         Install dependencies from the pnpm lockfile
   init [--stdin-json]            Create private local config; no overwrite
   prepare [--config FILE] [--stdin-json]  Prepare a temporary config
   check                         Check for missing configuration

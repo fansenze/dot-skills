@@ -23,3 +23,10 @@ config.json
 .env
 .env.*
 !.env.example
+
+# Keep one shared pnpm lockfile at the repository root
+package-lock.json
+npm-shrinkwrap.json
+yarn.lock
+pnpm-lock.yaml
+!/pnpm-lock.yaml

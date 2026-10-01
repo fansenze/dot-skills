@@ -24,7 +24,7 @@ Temporary files use the current execution environment's system temporary directo
 
 | Command | Action and result |
 | --- | --- |
-| `setup` | Install the lockfile's pinned dependencies with `npm ci --ignore-scripts` |
+| `setup` | Locate the shared workspace or standalone export and run `pnpm install --frozen-lockfile --ignore-scripts` |
 | `init` | Validate input and create a local configuration file |
 | `prepare` | Copy or generate a temporary configuration file and return its path |
 | `check` | Check for missing configuration |
@@ -68,7 +68,7 @@ Ctrl-C or SIGTERM closes the connection and releases the instance lock. After an
 
 ## Network and runtime
 
-Use Node.js 22.18+ and npm. Dependencies are pinned to the official `@larksuiteoapi/node-sdk 1.74.0`, `yaml 2.9.1`, and `proxy-agent 8.0.2`; the lockfile records the complete dependency tree. Storage uses the built-in `node:sqlite` API, which is still marked experimental in Node 22.
+Use Node.js 22.18+ and pnpm 11.27.0. Dependencies are pinned to the official `@larksuiteoapi/node-sdk 1.74.0`, `yaml 2.9.1`, and `proxy-agent 8.0.2`. The repository root owns the shared `pnpm-lock.yaml`; the skill's `package.json` declares its direct dependencies. Storage uses the built-in `node:sqlite` API, which is still marked experimental in Node 22.
 
 REST and WebSocket connections share a ProxyAgent. Supported variables include `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, and their lowercase forms. WSS uses an explicit `WSS_PROXY` first, otherwise the HTTPS proxy. WS similarly uses `WS_PROXY` or the HTTP proxy.
 
@@ -91,9 +91,11 @@ The SDK manages reconnection. Confirm readiness through `transport_connected` or
 
 ## Packaging and migration
 
-Run `bash feishu.sh package` to create the archive. If the output file already exists, choose another output filename. The package contains code, tests, a blank configuration template, and documentation. It excludes local configuration, inbox data, logs, caches, and node_modules.
+Run `bash feishu.sh package` from the skill directory, or `pnpm package:feishu` from the repository root. If the output file already exists, choose another output filename. The archive contains code, tests, a blank configuration template, documentation, and a generated standalone pnpm lockfile. Packaging selects this skill's importer from the shared lockfile and preserves its dependency resolutions; the exported manifest also receives the root's pinned pnpm version. It excludes local configuration, inbox data, logs, caches, and node_modules.
 
 Copy the archive to another computer, extract it, and run `setup` from the skill directory. Use the skill interaction or an existing file with `prepare`, then use the returned path for `check` and `start`.
+
+In a repository checkout, `setup` locates the root workspace automatically. It also accepts pnpm install options, for example `setup --offline` when the needed packages are already cached. Copy the generated archive when moving only this skill; copying its raw source folder alone does not include the repository's shared lockfile.
 
 ## Official references
 
@@ -105,3 +107,5 @@ Copy the archive to another computer, extract it, and run `setup` from the skill
 - [Official Node SDK](https://github.com/larksuite/node-sdk)
 - [Node 22.18 SQLite API](https://nodejs.org/download/release/v22.18.0/docs/api/sqlite.html)
 - [ProxyAgent](https://github.com/TooTallNate/proxy-agents/tree/main/packages/proxy-agent)
+- [pnpm workspaces and shared lockfiles](https://pnpm.io/workspaces)
+- [pnpm install](https://pnpm.io/cli/install)
