@@ -9,6 +9,7 @@ Reading or editing a skill is repository maintenance, not activation of that ski
 | Skill | Directory | Workspace package |
 | --- | --- | --- |
 | Feishu Message Server | `skills/messaging/feishu-message-server/` | `feishu-message-server-skill` |
+| Remote Config Bridge | `skills/messaging/remote-config-bridge/` | `remote-config-bridge-skill` |
 | Manage Dot Tasks | `skills/automation/manage-dot-tasks/` | `manage-dot-tasks-skill` |
 | Transfer Local Files to dot | `skills/files/transfer-local-files-to-dot/` | `transfer-local-files-to-dot-skill` |
 
@@ -20,7 +21,7 @@ Read the affected skill's `SKILL.md` and the references relevant to the change. 
 - Install from the repository root with `pnpm install --frozen-lockfile`.
 - Declare dependencies in the owning skill's `package.json`. For intentional dependency changes, update the shared lockfile with `pnpm install` from the root.
 - Track only the root `pnpm-lock.yaml`. Preserve the workspace's `ignoreScripts: true` setting.
-- Manage Dot Tasks and Transfer Local Files to dot use built-in Node modules and run without dependency installation. Preserve this standalone behavior when changing their implementations.
+- Manage Dot Tasks, Remote Config Bridge, and Transfer Local Files to dot use built-in Node modules and run without dependency installation. Preserve this standalone behavior when changing their implementations.
 
 ## Editing and adding skills
 
@@ -34,7 +35,8 @@ Read the affected skill's `SKILL.md` and the references relevant to the change. 
 ## Preserve the skill contracts
 
 - Feishu receives and stores messages without automatically replying or executing tasks. Preserve its distinction between process startup, connection readiness, message receipt, and send results; see its [skill instructions](skills/messaging/feishu-message-server/SKILL.md).
-- The task ledger records progress and acceptance evidence. Preserve its state, locking, recovery, and compatibility rules; it does not schedule work or establish platform-memory persistence. See its [data model](skills/automation/manage-dot-tasks/references/model.md).
+- Manage Dot Tasks unifies task records, durable scheduling, and Markdown views. Preserve state, locking, recovery, compatibility, and acceptance rules. Its Node scheduler does not execute platform tasks or establish platform-memory persistence; dot uses actual tools to consume authorized requests. See its [data model](skills/automation/manage-dot-tasks/references/model.md) and [scheduling contract](skills/automation/manage-dot-tasks/references/scheduling.md).
+- Remote Config Bridge preserves the accepted durable operation/replay and generation-safe locking contract. Config/credentials and Feishu transport stay on the selected computer; only authorized operation batches/receipts cross through actual agent task tools. It is not arbitrary file transfer. See its [orchestration guide](skills/messaging/remote-config-bridge/references/orchestration.md).
 - File transfer preserves opaque payload bytes. Keep filesystem packaging and verification separate from Dot's official Library transport and consumer acceptance; see its [handoff contract](skills/files/transfer-local-files-to-dot/references/handoff.md).
 
 ## Validation
@@ -54,10 +56,10 @@ pnpm --filter <workspace-package> run test
 
 ## Portable exports
 
-- Root export commands are `pnpm package:feishu`, `pnpm package:tasks`, and `pnpm package:transfer`; output locations and extraction checks are documented in the [README](README.md#validate-and-package).
+- Root export commands are `pnpm package:feishu`, `pnpm package:tasks`, `pnpm package:tasks-with-feishu`, `pnpm package:bridge`, and `pnpm package:transfer`; output locations and extraction checks are documented in the [README](README.md#validate-and-package).
 - When changing dependencies, packaged files, layout, or runtime entry points, verify the affected archive in a separate directory.
-- Review each skill's `scripts/package.mjs` when adding files. Feishu and transfer use explicit file lists; task packaging rejects unexpected top-level entries. Keep this `AGENTS.md` at the repository root.
-- Feishu derives a standalone lockfile from the shared workspace lock during export. Task and transfer archives require no lockfile or third-party dependencies.
+- Review each skill's `scripts/package.mjs` when adding files. Feishu, bridge, and transfer use explicit file lists; task packaging rejects unexpected top-level entries. Keep this `AGENTS.md` at the repository root.
+- Feishu derives a standalone lockfile from the shared workspace lock during export. Task, bridge, and transfer archives require no lockfile or third-party dependencies.
 - Keep runtime data, installed dependencies, and generated archives outside the reusable export contents.
 
 ## Local data

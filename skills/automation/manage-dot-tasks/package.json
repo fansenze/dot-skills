@@ -2,12 +2,14 @@
   "name": "manage-dot-tasks-skill",
   "version": "1.0.0",
   "private": true,
-  "description": "File-backed task ledger with evidence, acceptance checks, and Markdown views",
+  "description": "Unified task management, durable scheduling, acceptance checks, and Markdown views",
   "type": "module",
-  "engines": { "node": ">=22.18.0" },
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "cli": "node scripts/taskctl.mjs",
-    "validate": "node --check scripts/taskctl.mjs && node --check scripts/package.mjs",
+    "validate": "node --check scripts/taskctl.mjs && node --check scripts/scheduler.mjs && node --check scripts/integration.mjs && node --check scripts/connectors/contract.mjs && node --check scripts/connectors/feishu.mjs && node --check scripts/package.mjs && node --check scripts/package-with-feishu.mjs",
     "test": "node --test tests/*.test.mjs",
     "package": "node scripts/package.mjs"
   }

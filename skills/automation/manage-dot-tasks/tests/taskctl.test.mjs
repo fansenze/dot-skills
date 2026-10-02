@@ -500,6 +500,59 @@ test('a live owner is not stolen and lock timeout is bounded', async t => {
   assert.ok(!fs.existsSync(path.join(l.root, '.lock-node'))); assert.equal(l.call('doctor').ok, true);
 });
 
+test('lock release between lstat and acquisition does not fail path resolution', async t => {
+  const l = ledger(t), store = new m.Store(l.root), lock = path.join(store.root, '.lock-node');
+  const token = `owner-${process.pid}-${'2'.repeat(24)}.json`;
+  fs.mkdirSync(lock); fs.writeFileSync(path.join(lock, token), encoded({ schema_version: 1, pid: process.pid, hostname: os.hostname(), token }));
+  const lstat = fs.lstatSync; let released = false, entered = false;
+  fs.lstatSync = function (p, ...args) {
+    const stat = lstat.call(this, p, ...args);
+    if (p === lock && !released) {
+      released = true;
+      // Another owner finishes after this contender observed its directory.
+      fs.unlinkSync(path.join(lock, token)); fs.rmdirSync(lock);
+    }
+    return stat;
+  };
+  try { await store.locked(() => { entered = true; }); }
+  finally { fs.lstatSync = lstat; }
+  assert.equal(released, true); assert.equal(entered, true);
+  assert.ok(!fs.existsSync(lock)); assert.equal(l.call('doctor').ok, true);
+});
+
+test('lock owner disappearance after directory listing is retried safely', async t => {
+  const l = ledger(t), store = new m.Store(l.root), lock = path.join(store.root, '.lock-node');
+  const token = `owner-${process.pid}-${'3'.repeat(24)}.json`;
+  fs.mkdirSync(lock); fs.writeFileSync(path.join(lock, token), encoded({ schema_version: 1, pid: process.pid, hostname: os.hostname(), token }));
+  const readdir = fs.readdirSync; let released = false, entered = false;
+  fs.readdirSync = function (p, ...args) {
+    const names = readdir.call(this, p, ...args);
+    if (p === lock && !released) {
+      released = true; fs.unlinkSync(path.join(lock, token)); fs.rmdirSync(lock);
+    }
+    return names;
+  };
+  try { await store.locked(() => { entered = true; }); }
+  finally { fs.readdirSync = readdir; }
+  assert.equal(released, true); assert.equal(entered, true); assert.ok(!fs.existsSync(lock));
+});
+
+for (const code of ['EACCES', 'EIO', 'ENOTDIR']) {
+  test(`lock inspection preserves ${code} errors and existing owner data`, async t => {
+    const l = ledger(t), store = new m.Store(l.root), lock = path.join(store.root, '.lock-node');
+    const token = `owner-${process.pid}-${'4'.repeat(24)}.json`, owner = encoded({ schema_version: 1, pid: process.pid, hostname: os.hostname(), token });
+    fs.mkdirSync(lock); fs.writeFileSync(path.join(lock, token), owner);
+    const lstat = fs.lstatSync; let entered = false;
+    fs.lstatSync = function (p, ...args) {
+      if (p === lock) throw Object.assign(new Error('Synthetic lock inspection error'), { code });
+      return lstat.call(this, p, ...args);
+    };
+    try { await assert.rejects(store.locked(() => { entered = true; }), error => error.code === code); }
+    finally { fs.lstatSync = lstat; }
+    assert.equal(entered, false); assert.equal(text(path.join(lock, token)), owner);
+  });
+}
+
 test('foreign-host locks are preserved instead of guessed stale', t => {
   const l = ledger(t), token = `owner-123-${'b'.repeat(24)}.json`, lock = path.join(l.root, '.lock-node');
   fs.mkdirSync(lock); const owner = encoded({ schema_version: 1, pid: 123, hostname: 'synthetic-other-host', token });

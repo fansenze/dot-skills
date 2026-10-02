@@ -3,7 +3,10 @@
   "private": true,
   "description": "Reusable Dot skills organized as a pnpm workspace",
   "packageManager": "pnpm@11.27.0",
-  "engines": { "node": ">=22.18.0", "pnpm": "11.27.0" },
+  "engines": {
+    "node": ">=22.18.0",
+    "pnpm": "11.27.0"
+  },
   "scripts": {
     "validate": "pnpm -r --if-present run validate",
     "test": "pnpm -r --if-present run test",
@@ -13,6 +16,9 @@
     "tasks": "pnpm --filter manage-dot-tasks-skill run cli",
     "package:tasks": "pnpm --filter manage-dot-tasks-skill run package ../../../dist/manage-dot-tasks.zip",
     "transfer": "pnpm --filter transfer-local-files-to-dot-skill run cli",
-    "package:transfer": "pnpm --filter transfer-local-files-to-dot-skill run package ../../../dist/transfer-local-files-to-dot.zip"
+    "package:transfer": "pnpm --filter transfer-local-files-to-dot-skill run package ../../../dist/transfer-local-files-to-dot.zip",
+    "package:tasks-with-feishu": "node skills/automation/manage-dot-tasks/scripts/package-with-feishu.mjs dist/manage-dot-tasks-with-feishu.zip",
+    "bridge": "pnpm --filter remote-config-bridge-skill run cli",
+    "package:bridge": "node skills/messaging/remote-config-bridge/scripts/package.mjs --output dist/remote-config-bridge.tgz"
   }
 }

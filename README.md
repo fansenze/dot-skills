@@ -1,58 +1,43 @@
 # Dot Skills
 
-Reusable skills for messaging, task tracking, and moving local files to dot.
+Reusable skills for messaging, task management and scheduling, and moving local files to dot.
 
 ## Skill catalog
 
 | Category | Skill | Use it to |
 | --- | --- | --- |
-| Messaging | [Feishu Message Server](skills/messaging/feishu-message-server/SKILL.md) | Receive private messages and group mentions; send or reply with text. |
-| Automation | [Manage Dot Tasks](skills/automation/manage-dot-tasks/SKILL.md) | Track goals, progress, blockers, results, and acceptance evidence. |
+| Messaging | [Feishu Message Server](skills/messaging/feishu-message-server/SKILL.md) | Receive private messages and group mentions; send or reply with explicit text, Markdown, or cards. |
+| Messaging | [Remote Config Bridge](skills/messaging/remote-config-bridge/SKILL.md) | Keep configuration/credentials on the selected computer; bridge authorized operations and receipts through a reused local task. |
+| Automation | [Manage Dot Tasks](skills/automation/manage-dot-tasks/SKILL.md) | Manage tasks, scheduling, authorized notifications/inbound commands, and acceptance through one CLI and Markdown UI. |
 | Files | [Transfer Local Files to dot](skills/files/transfer-local-files-to-dot/SKILL.md) | Copy selected local files through ChatGPT Library and verify exact bytes on dot. |
 
-## Workflow: track Dot and local tasks in Feishu
+## Workflow: install and start task management
 
-Send Dot and local task updates to Feishu. Markdown is delivered as plain text.
-
-### Before you start
-
-- **Allow local access:** in the ChatGPT desktop app, open your dot's profile → **Computers** → **Your computer** → **Allow access** and confirm. Keep the computer online with the app running. See the [official setup guide](https://learn.chatgpt.com/docs/dots/computers-and-apps#connect-your-computer).
-- **Prepare your Feishu config:** the file must contain `app_id` and `app_secret`. You only need its path for the prompt.
-- **If dot asks whether the config contains secrets:** either reply "No, continue the transfer," or manually upload the config to dot and ask it to use the uploaded file.
-
-### Copy this prompt
-
-Copy the **entire text block below** into dot. Replace `<FEISHU_CONFIG_PATH>` with your local file path, or `reuse existing Dot config`. Change the `Notify` line only if needed.
+Ask dot to install and start Manage Dot Tasks. The agent selects the configuration’s actual environment. For a user-computer configuration orchestrated by dot, Remote Config Bridge keeps configuration and Feishu transport there and transports only authorized batches/results through a reused local task. Same-environment configurations use the direct connector. Both routes reuse verified recipients. You do not write integration code. Configuration, task execution, notifications and inbound command authorization remain explicit scopes.
 
 ```text
-Feishu config: <FEISHU_CONFIG_PATH>
-Notify: my Feishu private chat
-
-Use https://github.com/fansenze/dot-skills. Follow each skill's instructions
-and complete these steps in order. If blocked, report why and stop
-dependent steps.
-
-1. Use transfer-local-files-to-dot to transfer the selected config to dot
-   through ChatGPT Library without reading or displaying its contents.
-   Reuse the selected config or a verified copy of it if already on dot.
-
-2. Once the config is ready on dot, use feishu-message-server to configure
-   and start the server with it, then report the verified connection state
-   and resolve Notify.
-
-3. Use manage-dot-tasks to track all existing and new Dot and local tasks,
-   including locally started tasks. Send an initial overview, then
-   progress, blockers, failures and verified completion to Notify through
-   feishu-message-server. Render Markdown and record send results.
-   Continue until I ask you to stop. Skip duplicate or unchanged updates
-   and the monitor's own routine checks. Report monitoring gaps.
+Install and start manage-dot-tasks from this repository.
+Reuse my existing verified Feishu configuration on its original computer and
+my private-chat mapping. If dot runs elsewhere, use remote-config-bridge and
+keep credentials there; reuse one verified local task.
+Send an initial task overview, then meaningful progress, blockers, failures,
+and verified completion as native cards. Allow my verified sender/account/
+tenant/chat to use /tasks list, show, run and verify for the agreed tasks.
+Discover and bind conversation commitments, delegated work and local tasks
+through your available tools. Report partial or unavailable discovery.
+Continue the active start/process/record/ack loop until I ask you to stop,
+reading yielded tool sessions and rearming after bounded idle timeouts.
 ```
+
+If configuration, account, sender, destination or scope is missing, dot requests only that information and continues local task setup. Configuration routing is not a credential transfer. Remote Config Bridge has no arbitrary file read/export function and does not replace upload/download tools; distributing reviewed code may still require supported file transfer. Separate authorized ordinary-file transfers follow the transfer skill’s contract. Never describe a credential-bearing configuration as secret-free to bypass a restriction. No generic setup action silently starts a service or sends a message. The active loop depends on dot’s running tool calls, permissions and environment; it cannot wake an inactive dot.
+
+See the [task/server connector contract](skills/automation/manage-dot-tasks/references/connectors.md) for setup, recovery and extension details. Feishu cards use native columns; Markdown/text fallbacks require an explicit supported format choice.
 
 ## Use a skill
 
 Install the complete skill directory from this repository or an exported archive through dot's supported installation workflow, then follow its `SKILL.md`. Each skill keeps its setup, commands, and troubleshooting in that directory.
 
-For CLI use, Node.js 22.18+ is required; Feishu also needs pnpm 11.27.0 and dependency installation. Manage Dot Tasks and the transfer filesystem helper run with built-in Node modules only.
+For CLI use, Node.js 22.18+ is required; Feishu also needs pnpm 11.27.0 and dependency installation. Manage Dot Tasks, Remote Config Bridge and the transfer filesystem helper run with built-in Node modules only.
 
 ## Validate and package
 
@@ -67,12 +52,29 @@ pnpm check
 | --- | --- |
 | `pnpm package:feishu` | `skills/messaging/feishu-message-server/dist/feishu-message-server-node.tgz` |
 | `pnpm package:tasks` | `dist/manage-dot-tasks.zip` |
+| `pnpm package:tasks-with-feishu` | `dist/manage-dot-tasks-with-feishu.zip` (task, Feishu and bridge skills plus manifest) |
+| `pnpm package:bridge` | `dist/remote-config-bridge.tgz` |
 | `pnpm package:transfer` | `dist/transfer-local-files-to-dot.zip` |
 
 Extract into a separate directory. From the extracted skill directory, check:
 
 - **Feishu:** `bash feishu.sh setup`, `bash feishu.sh validate`, then `bash feishu.sh test`.
-- **Tasks:** `node --test tests/taskctl.test.mjs`.
+- **Tasks:** `node --test tests/*.test.mjs`.
+- **Bridge:** `node scripts/validate.mjs`, then `node --test tests/*.test.mjs` (fourteen upstream tests plus orchestration/package scenarios).
 - **Transfer:** `node scripts/validate.mjs`, then `node --test tests/*.test.mjs`.
 
 These checks use synthetic data; live delivery and monitoring require verification in dot. For repository maintenance and contribution rules, see [AGENTS.md](AGENTS.md).
+
+The combined archive includes the complete task, Feishu and Remote Config Bridge skills. Feishu has a generated standalone lockfile; task and bridge need no dependencies or lockfile. A standalone Feishu archive includes the remote routing recipe and resolves the separately installed bridge through the catalog/repository. Verify every entry against `MANIFEST.json`; extract separately, install Feishu dependencies with its `setup`, and run all three skills’ checks. Set `FEISHU_SKILL_PATH` to the extracted companion when running task tests to include the cross-skill cursor/capability fixture. Packaging and tests never start a real service.
+
+## Repository layout and categories
+
+```text
+skills/
+  automation/manage-dot-tasks/
+  messaging/feishu-message-server/
+  messaging/remote-config-bridge/
+  files/transfer-local-files-to-dot/
+```
+
+Messaging skills handle transport, automation owns task state/scheduling, and the file skill handles explicitly authorized ordinary-byte transfers. Remote Config Bridge does not add a general file transfer channel. Its [orchestration guide](skills/messaging/remote-config-bridge/references/orchestration.md) includes one-prompt setup, existing-config reuse, typed task-message boundaries, exact batch/receipt replay and late-result handling.

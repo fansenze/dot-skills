@@ -1,0 +1,236 @@
+{
+  "protocol_version": 1,
+  "commands": [
+    [
+      "init"
+    ],
+    [
+      "connect",
+      "--id",
+      "example-server",
+      "--module",
+      "${ADAPTER}",
+      "--settings-file",
+      "${SETTINGS}"
+    ],
+    [
+      "watch",
+      "--id",
+      "example-watch",
+      "--connector",
+      "example-server",
+      "--account",
+      "fixture-app",
+      "--destination",
+      "fixture-chat",
+      "--format",
+      "card",
+      "--events",
+      "registered,progress,completed",
+      "--tasks",
+      "task-example",
+      "--initial"
+    ],
+    [
+      "allow-inbound",
+      "--id",
+      "example-grant",
+      "--connector",
+      "example-server",
+      "--account",
+      "fixture-app",
+      "--tenant",
+      "fixture-tenant",
+      "--sender",
+      "fixture-sender",
+      "--destination",
+      "fixture-chat",
+      "--commands",
+      "list,show,run,verify",
+      "--tasks",
+      "task-example",
+      "--since",
+      "2000-01-01T00:00:00Z"
+    ],
+    [
+      "register",
+      "--id",
+      "task-example",
+      "--title",
+      "Example task",
+      "--goal",
+      "Verify the requested result"
+    ],
+    [
+      "update",
+      "task-example",
+      "--summary",
+      "Ready to proceed"
+    ],
+    [
+      "render",
+      "list"
+    ],
+    [
+      "deliver",
+      "--consumer",
+      "example-agent"
+    ],
+    [
+      "ingest",
+      "--connector",
+      "example-server"
+    ],
+    [
+      "inbound"
+    ],
+    [
+      "start",
+      "--consumer",
+      "example-agent",
+      "--timeout-ms",
+      "0"
+    ],
+    [
+      "outbox",
+      "--all"
+    ],
+    [
+      "deny-inbound",
+      "example-grant"
+    ],
+    [
+      "unwatch",
+      "example-watch"
+    ],
+    [
+      "doctor"
+    ]
+  ],
+  "receive_only": {
+    "settings": {
+      "send": false,
+      "reply": false,
+      "formats": []
+    },
+    "incoming": [
+      {
+        "event_id": "fixture-event-1",
+        "message_id": "fixture-message-1",
+        "account_id": "fixture-app",
+        "tenant_id": "fixture-tenant",
+        "sender_tenant_id": "fixture-tenant",
+        "sender_id": "fixture-sender",
+        "destination_id": "fixture-chat",
+        "type": "text",
+        "received_at": "2026-01-01T00:00:00Z",
+        "text": "/tasks run task-execute"
+      },
+      {
+        "event_id": "fixture-event-2",
+        "message_id": "fixture-message-2",
+        "account_id": "fixture-app",
+        "tenant_id": "fixture-tenant",
+        "sender_tenant_id": "fixture-tenant",
+        "sender_id": "fixture-sender",
+        "destination_id": "fixture-chat",
+        "type": "text",
+        "received_at": "2026-01-01T00:00:00Z",
+        "text": "/tasks verify task-verify Acceptance"
+      }
+    ],
+    "commands": [
+      [
+        "init"
+      ],
+      [
+        "connect",
+        "--id",
+        "receive-only",
+        "--module",
+        "${ADAPTER}",
+        "--settings-file",
+        "${SETTINGS}"
+      ],
+      [
+        "register",
+        "--id",
+        "task-execute",
+        "--title",
+        "Example execution",
+        "--goal",
+        "Perform authorized work"
+      ],
+      [
+        "register",
+        "--id",
+        "task-verify",
+        "--title",
+        "Example verification",
+        "--goal",
+        "Check the requested result",
+        "--status",
+        "awaiting_verification"
+      ],
+      [
+        "allow-inbound",
+        "--id",
+        "receive-run",
+        "--connector",
+        "receive-only",
+        "--account",
+        "fixture-app",
+        "--tenant",
+        "fixture-tenant",
+        "--sender",
+        "fixture-sender",
+        "--destination",
+        "fixture-chat",
+        "--commands",
+        "run",
+        "--tasks",
+        "task-execute",
+        "--since",
+        "2000-01-01T00:00:00Z",
+        "--reply-mode",
+        "send"
+      ],
+      [
+        "allow-inbound",
+        "--id",
+        "receive-verify",
+        "--connector",
+        "receive-only",
+        "--account",
+        "fixture-app",
+        "--tenant",
+        "fixture-tenant",
+        "--sender",
+        "fixture-sender",
+        "--destination",
+        "fixture-chat",
+        "--commands",
+        "verify",
+        "--tasks",
+        "task-verify",
+        "--since",
+        "2000-01-01T00:00:00Z"
+      ],
+      [
+        "ingest",
+        "--connector",
+        "receive-only"
+      ],
+      [
+        "queue"
+      ],
+      [
+        "outbox",
+        "--all"
+      ],
+      [
+        "doctor"
+      ]
+    ]
+  }
+}

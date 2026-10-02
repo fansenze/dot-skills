@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-/** Dependency-free, local-only task ledger. Node.js 22.18+; Linux/macOS. */
+/** Dependency-free task management and scheduling. Node.js 22.18+; Linux/macOS. */
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { create_scheduler, SCHEDULER_OPTIONS, SCHEDULER_IDS } from './scheduler.mjs';
+import { createIntegration, taskNotificationWrites, readIntegration, decorateNotifications, INTEGRATION_OPTIONS, INTEGRATION_IDS } from './integration.mjs';
 
 export class TaskError extends Error {}
 export function require_node(version = process.versions.node) {
@@ -46,6 +48,13 @@ export function observed_time(value) {
   const fraction = value && /\.(\d{1,6})/.exec(value);
   return d.toISOString().replace(/\.\d{3}Z$/, '.'+(fraction ? fraction[1].padEnd(6,'0') : String(d.getUTCMilliseconds()).padStart(3,'0')+'000')+'Z');
 }
+export function newer_execution(previous, next) {
+  if (previous.observed_at && timestamp_us(next.observed_at) < timestamp_us(previous.observed_at)) return false;
+  if (previous.source === next.source && previous.run_id === next.run_id && previous.source_version !== undefined) {
+    return next.source_version !== undefined && next.source_version > previous.source_version;
+  }
+  return true;
+}
 export function nonempty(value,field) { if(typeof value!=='string'||!value.trim()) throw new TaskError(`${field} must be nonempty text`); if(value.includes('\0')) throw new TaskError(`${field} contains NUL`); return value.trim(); }
 export function task_id(value) { if(typeof value!=='string'||! /^[a-z][a-z0-9-]{2,63}$/.test(value)) throw new TaskError('ID must be 3–64 lowercase letters, digits or hyphens, starting with a letter'); return value; }
 export function encoded(value) { return JSON.stringify(value,null,2)+'\n'; }
@@ -73,6 +82,7 @@ export function validate_task(t) {
   for(const c of t.checks){if(!['pass','fail'].includes(c.outcome))throw new TaskError('invalid check outcome');timestamp(c.at);nonempty(c.name,'check name');nonempty(c.evidence,'check evidence');if(!Number.isSafeInteger(c.work_revision)||c.work_revision<1||c.work_revision>t.work_revision)throw new TaskError('invalid check revision');}
   for(const r of t.results){nonempty(r.label,'result label');safe_link(r.url);}
   if(!record(t.execution)||!EXEC_STATES.includes(t.execution.state))throw new TaskError('invalid execution observation');if(t.execution.observed_at){timestamp(t.execution.observed_at);nonempty(t.execution.source,'execution source');}
+  if(t.execution.source_version!==undefined&&(!Number.isSafeInteger(t.execution.source_version)||t.execution.source_version<1))throw new TaskError('invalid execution source version');
   if(t.status==='completed'){const c=t.completion;if(!record(c))throw new TaskError('completed task lacks completion record');timestamp(c.at);nonempty(c.summary,'completion summary');nonempty(c.evidence,'completion evidence');if(t.blocker||t.steps.some(s=>!['completed','skipped'].includes(s.state)))throw new TaskError('completed task contains unresolved work');const checks=current_checks(t);if(!checks.length||checks.some(c=>c.outcome!=='pass'))throw new TaskError('completed task lacks current passing verification');if(c.work_revision!==t.work_revision)throw new TaskError('completion refers to superseded work');}
 }
 export const index_row=t=>Object.fromEntries(['id','title','status','updated_at'].map(k=>[k,t[k]]));
@@ -139,11 +149,19 @@ export class Store {
   path(relative){if(path.isAbsolute(relative)||relative.split(/[\\/]/).includes('..'))throw new TaskError('unsafe store path');return canonical_path(path.join(this.root,relative),{allow_symlinks:false});}
   async locked(fn,initialize=false){
     if(initialize)fs.mkdirSync(this.root,{recursive:true,mode:0o700});if(!fs.existsSync(this.root)||!fs.statSync(this.root).isDirectory())throw new TaskError('store does not exist; run init first');
-    const lock=this.path('.lock-node'),token=`owner-${process.pid}-${uid(24)}.json`,candidate=this.path('.lock-candidate-'+uid(24));
+    // The root is already canonical. The lock leaf is deliberately ephemeral:
+    // resolving it through lstat -> realpath races with another owner's release.
+    // Check its type in the acquisition loop without following the leaf.
+    const lock=path.join(this.root,'.lock-node'),token=`owner-${process.pid}-${uid(24)}.json`,candidate=this.path('.lock-candidate-'+uid(24));
     fs.mkdirSync(candidate,{mode:0o700});fs.writeFileSync(path.join(candidate,token),encoded({schema_version:1,pid:process.pid,hostname:os.hostname(),token}),{mode:0o600,flag:'wx'});
     let acquired=false;const end=performance.now()+this.timeout*1000;
     try {
       for(;;){
+        try {
+          const stat=fs.lstatSync(lock);
+          if(stat.isSymbolicLink())throw new TaskError('store paths must not traverse symlinks');
+          if(!stat.isDirectory())throw new TaskError('invalid lock directory; preserve store for inspection');
+        } catch(e) {if(e.code!=='ENOENT')throw e;}
         try{fs.renameSync(candidate,lock);acquired=true;break;}catch(e){if(!['EEXIST','ENOTEMPTY','EACCES'].includes(e.code))throw e;}
         // A complete owner directory is installed in one rename. A contender
         // removes only the dead owner's unique filename, never recursive rm.
@@ -162,13 +180,13 @@ export class Store {
       else{try{fs.unlinkSync(path.join(candidate,token));fs.rmdirSync(candidate);}catch(e){if(e.code!=='ENOENT')throw e;}}
     }
   }
-  recover(){const journal=this.path('.transaction.json');if(!fs.existsSync(journal))return;const tx=read_json(journal);if(!record(tx)||tx.schema_version!==VERSION||!record(tx.writes))throw new TaskError('invalid recovery journal; preserve store for inspection');for(const [rel,content]of Object.entries(tx.writes)){if(!(['store.json','tasks.json'].includes(rel)||/^tasks\/[a-z][a-z0-9-]{2,63}\/(task\.json|goal\.md|steps\.md|events\.jsonl|verification\.md|results\.md)$/.test(rel))||typeof content!=='string')throw new TaskError('unsafe recovery journal; preserve store for inspection');this.path(rel);}for(const [rel,content]of Object.entries(tx.writes))atomic_write(this.path(rel),content);fs.unlinkSync(journal);this.sync_root();}
+  recover(){const journal=this.path('.transaction.json');if(!fs.existsSync(journal))return;const tx=read_json(journal);if(!record(tx)||tx.schema_version!==VERSION||!record(tx.writes))throw new TaskError('invalid recovery journal; preserve store for inspection');for(const [rel,content]of Object.entries(tx.writes)){if(!(['store.json','tasks.json','scheduler.json','integration.json'].includes(rel)||/^tasks\/[a-z][a-z0-9-]{2,63}\/(task\.json|goal\.md|steps\.md|events\.jsonl|verification\.md|results\.md)$/.test(rel))||typeof content!=='string')throw new TaskError('unsafe recovery journal; preserve store for inspection');this.path(rel);}for(const [rel,content]of Object.entries(tx.writes))atomic_write(this.path(rel),content);fs.unlinkSync(journal);this.sync_root();}
   sync_root(){sync_dir(this.root);}
   commit(writes){for(const rel of Object.keys(writes))this.path(rel);atomic_write(this.path('.transaction.json'),encoded({schema_version:VERSION,writes}));this.recover();}
   config(){const c=read_json(this.path('store.json'));if(!record(c)||c.schema_version!==VERSION)throw new TaskError('unsupported/invalid store schema');if(typeof c.stale_hours!=='number'||!Number.isFinite(c.stale_hours)||c.stale_hours<=0)throw new TaskError('stale_hours must be positive and finite');return c;}
   index(){const a=read_json(this.path('tasks.json'));if(!Array.isArray(a))throw new TaskError('tasks.json must be a JSON array');const ids=[];for(const r of a){if(!record(r)||Object.keys(r).sort().join()!==['id','status','title','updated_at'].join())throw new TaskError('invalid lightweight index row');task_id(r.id);nonempty(r.title,'index title');if(!STATES.includes(r.status))throw new TaskError('invalid index status');timestamp(r.updated_at);ids.push(r.id);}if(new Set(ids).size!==ids.length)throw new TaskError('duplicate index IDs');return a;}
   get(id){const t=read_json(this.path(`tasks/${task_id(id)}/task.json`));validate_task(t);if(t.id!==id)throw new TaskError('task directory and record ID differ');return t;}
-  save(t,isNew=false){validate_task(t);let index=this.index();const present=index.some(r=>r.id===t.id);if(isNew&&(present||fs.existsSync(this.path(`tasks/${t.id}/task.json`))))throw new TaskError('task ID already exists');if(!isNew&&!present)throw new TaskError('task is missing from index; run doctor');index=index.filter(r=>r.id!==t.id).concat([index_row(t)]).sort((a,b)=>lex(a.id,b.id));const prefix=`tasks/${t.id}/`,writes={[prefix+'task.json']:encoded(t)};for(const[k,v]of Object.entries(projections(t)))writes[prefix+k]=v;writes['tasks.json']=encoded(index);this.commit(writes);}
+  save(t,isNew=false,extraWrites={}){validate_task(t);let index=this.index();const present=index.some(r=>r.id===t.id);if(isNew&&(present||fs.existsSync(this.path(`tasks/${t.id}/task.json`))))throw new TaskError('task ID already exists');if(!isNew&&!present)throw new TaskError('task is missing from index; run doctor');index=index.filter(r=>r.id!==t.id).concat([index_row(t)]).sort((a,b)=>lex(a.id,b.id));const prefix=`tasks/${t.id}/`,writes={[prefix+'task.json']:encoded(t)};for(const[k,v]of Object.entries(projections(t)))writes[prefix+k]=v;writes['tasks.json']=encoded(index);this.commit({...writes,...taskNotificationWrites(this,t,isNew?null:this.get(t.id)),...extraWrites});}
   all(){return this.index().map(r=>{const t=this.get(r.id);if(['id','title','status','updated_at'].some(k=>r[k]!==t[k]))throw new TaskError('index/detail mismatch; run doctor');return t;});}
   mutate(id,expected,fn,work=false){const t=this.get(id);if(expected!=null&&expected!==t.revision)throw new TaskError(`revision conflict: expected ${expected}, current ${t.revision}; re-read before retrying`);if(work&&t.status==='completed')throw new TaskError('reopen a completed task with update --status executing --reason before changing its work');fn(t);t.revision++;if(work){t.work_revision++;t.completion=null;}t.updated_at=now();this.save(t);return t;}
 }
@@ -176,12 +194,12 @@ export function freshness(t,hours,current=new Date()){if(TERMINAL.has(t.status))
 export const last_check_label=t=>display_time(t.last_checked_at);
 export function step_focus(t){if(t.status==='completed')return 'Verified complete; no pending steps';if(t.status==='cancelled')return 'Cancelled; no next step';for(const state of ['executing','queued']){const s=t.steps.find(s=>s.state===state);if(s)return s.title;}return t.next_action||(t.steps.length?'All steps recorded as finished':'Next step not set');}
 export const UI_LABELS={en:{list_title:'Tasks',columns:['Title','Status','Summary'],empty:'No tasks',blocked:'Blocked',cancelled:'Cancelled',failed:'Failed',check_failed:'Verification failed',execution_failed:'Execution failed',execution_interrupted:'Execution interrupted',execution_disconnected:'Environment disconnected',observed:'observed',unplanned:'Next step not set',awaiting:'Awaiting verification',recheck:'Reverification needed',goal:'Goal',next:'Next',last_checked:'Last checked',update_needed:'update needed',steps:'Steps',checks:'Checks',results:'Results'},zh:{list_title:'任务列表',columns:['标题','状态','信息描述'],empty:'暂无任务',blocked:'受阻',cancelled:'已取消',failed:'未达成',check_failed:'验证未通过',execution_failed:'执行失败',execution_interrupted:'执行中断',execution_disconnected:'执行环境断开',observed:'观察于',unplanned:'待安排下一步',awaiting:'待验证',recheck:'需重新验收',goal:'目标',next:'下一步',last_checked:'最近核查',update_needed:'需更新',steps:'步骤',checks:'验证',results:'结果'}};
-export function visible_tasks(tasks,current=new Date(),include_all=false){return tasks.filter(t=>include_all||t.status!=='completed'||BigInt(current.getTime())*1000n-timestamp_us(t.updated_at)<600000000n);}
+export function visible_tasks(tasks,current=new Date(),include_all=false){return tasks.filter(t=>include_all||t.scheduling_summary||t.notification_summary||t.status!=='completed'||BigInt(current.getTime())*1000n-timestamp_us(t.updated_at)<600000000n);}
 export const status_cell=t=>t.status==='completed'?'✅ '+display_time(t.completion.at):['queued','cancelled'].includes(t.status)?'🕒':'🚧';
 function newest(events){return events.reduce((a,b)=>!a||timestamp_us(b.at)>timestamp_us(a.at)?b:a,null);}
 function status_reason(events){const text=newest(events.filter(e=>e.kind==='status'))?.text||'';const separator=/[:：]/.exec(text);return separator?text.slice(separator.index+1).trimStart():'';}
 export function latest_progress(t){return newest(t.events.filter(e=>['progress','note','decision'].includes(e.kind)))?.text||'';}
-export function progress_summary(t,language='en'){if(t.status==='completed')return t.completion.summary;const ui=UI_LABELS[language],parts=[],concise=(t.summary||'').trim();if(['cancelled','failed'].includes(t.status)){const explanation=concise||status_reason(t.events)||latest_progress(t);parts.push(ui[t.status]+(explanation?': '+explanation:''));}if(t.blocker)parts.push(ui.blocked+': '+(concise||t.blocker));const failures=current_checks(t).filter(c=>c.outcome==='fail');if(failures.length)parts.push(ui.check_failed+': '+failures.map(c=>c.name).join(', '));const ex=t.execution;if(['failed','interrupted','disconnected'].includes(ex.state))parts.push(ui['execution_'+ex.state]+' ('+ui.observed+' '+display_time(ex.observed_at)+')');if(!parts.length)parts.push(concise||latest_progress(t)||t.steps.find(s=>s.state==='executing')?.title||t.next_action||ui.unplanned);if(t.status==='awaiting_verification'&&!failures.length)parts.push(ui.awaiting);return [...new Set(parts)].join('; ');}
+export function progress_summary(t,language='en'){if(t.status==='completed')return [t.completion.summary,t.scheduling_summary,t.notification_summary].filter(Boolean).join('; ');const ui=UI_LABELS[language],parts=[],concise=(t.summary||'').trim();if(['cancelled','failed'].includes(t.status)){const explanation=concise||status_reason(t.events)||latest_progress(t);parts.push(ui[t.status]+(explanation?': '+explanation:''));}if(t.blocker)parts.push(ui.blocked+': '+(concise||t.blocker));const failures=current_checks(t).filter(c=>c.outcome==='fail');if(failures.length)parts.push(ui.check_failed+': '+failures.map(c=>c.name).join(', '));const ex=t.execution;if(['failed','interrupted','disconnected'].includes(ex.state))parts.push(ui['execution_'+ex.state]+' ('+ui.observed+' '+display_time(ex.observed_at)+')');if(!parts.length)parts.push(concise||latest_progress(t)||t.steps.find(s=>s.state==='executing')?.title||t.next_action||ui.unplanned);if(t.status==='awaiting_verification'&&!failures.length)parts.push(ui.awaiting);if(t.scheduling_summary)parts.push(t.scheduling_summary);if(t.notification_summary)parts.push(t.notification_summary);return [...new Set(parts)].join('; ');}
 export const table_cell=v=>safe_md(String(v).replace(/\r\n?/g,'\n'));
 export function compact_verification(t,language='en'){const ui=UI_LABELS[language],checks=current_checks(t);if(!checks.length)return t.checks.length?'- '+ui.recheck:t.status==='awaiting_verification'?'- '+ui.awaiting:'';return checks.sort(check_sort).map(c=>`- ${c.outcome==='pass'?'✅':'❌'} ${safe_md(c.name)}：${safe_md(c.evidence)}`).join('\n');}
 function substitute(template,values){return template.replace(/\$\$|\$\{([^}]+)\}|\$([a-zA-Z_][a-zA-Z0-9_]*)|\$/g,(full,a,b)=>{if(full==='$$')return '$';const key=a||b;if(!key||!has(values,key))throw new TaskError(`invalid or unknown template placeholder: ${full}`);return values[key];});}
@@ -190,17 +208,17 @@ export function render_list(tasks,config,template,link_details=false,current=new
 export function write_output(p,content,store){const target=canonical_path(p),relative=path.relative(store.root,target);if(!relative||(!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative)))throw new TaskError('render outputs must be outside the authoritative task store');atomic_write(target,content);return target;}
 
 const COMMAND_OPTIONS={
-  init:['stale-hours','snapshot-note'],register:['id','title','goal','status','blocker','next-action','summary','source'],
+  init:['stale-hours','snapshot-note'],register:['id','title','goal','status','blocker','next-action','summary','source','source-ref'],
   update:['title','goal','blocker','next-action','summary','reason','status','expected-revision'],
   step:['step-id','title','state','evidence','expected-revision'],event:['text','kind','source','expected-revision'],
-  observe:['state','source','observed-at','run-id','expected-revision'],check:['name','outcome','evidence','checked-at','expected-revision'],
+  observe:['state','source','observed-at','run-id','source-version','expected-revision'],check:['name','outcome','evidence','checked-at','expected-revision'],
   result:['label','url','expected-revision'],complete:['summary','evidence','expected-revision'],
-  list:['status','all'],show:[],render:['output','all','language','templates'],doctor:[],verify:[]
+  list:['status','all'],show:[],render:['output','all','language','templates'],doctor:[],verify:[],...SCHEDULER_OPTIONS,...INTEGRATION_OPTIONS
 };
 const DEFAULT_TEMPLATES=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../ui');
 export function help(command) {
-  const first='taskctl — local task ledger (Node.js 22.18+)\n';
-  if(command&&has(COMMAND_OPTIONS,command))return first+`Usage: node taskctl.mjs [--store PATH] ${command}${['update','step','event','observe','check','result','complete','show'].includes(command)?' ID':command==='render'?' list|detail|bundle [ID]':''} [options]\nOptions: `+COMMAND_OPTIONS[command].map(o=>'--'+o).join(', ')+'\nSee references/cli.md for required fields and examples.\n';
+  const first='taskctl — task management and scheduling (Node.js 22.18+)\n';
+  if(command&&has(COMMAND_OPTIONS,command))return first+`Usage: node taskctl.mjs [--store PATH] ${command}${['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS].includes(command)?' ID':command==='render'?' list|detail|bundle [ID]':''} [options]\nOptions: `+COMMAND_OPTIONS[command].map(o=>'--'+o).join(', ')+'\nSee references/cli.md for required fields and examples.\n';
   return first+'Usage: node taskctl.mjs [--store PATH] [--lock-timeout SECONDS] COMMAND [options]\nCommands: '+Object.keys(COMMAND_OPTIONS).join(', ')+'\nUse COMMAND --help for command options.\n';
 }
 export function default_store({ env = process.env, platform = process.platform, home = os.homedir(), dot_shared = fs.existsSync('/workspace/shared') } = {}) {
@@ -212,18 +230,19 @@ export function default_store({ env = process.env, platform = process.platform, 
 }
 export function parse_args(argv=process.argv.slice(2)) {
   const args={store:default_store(),lock_timeout:10};let i=0;
-  function option(allowed){const raw=argv[i++],eq=raw.indexOf('='),key=raw.slice(2,eq<0?undefined:eq);if(!allowed.includes(key))throw new TaskError(`unrecognized argument: ${raw}`);let value;if(key==='all'){if(eq>=0)throw new TaskError('--all does not take a value');value=true;}else{value=eq>=0?raw.slice(eq+1):argv[i++];if(value===undefined||value.startsWith('--'))throw new TaskError(`--${key} requires a value`);}args[key.replaceAll('-','_')]=value;}
+  function option(allowed){const raw=argv[i++],eq=raw.indexOf('='),key=raw.slice(2,eq<0?undefined:eq);if(!allowed.includes(key))throw new TaskError(`unrecognized argument: ${raw}`);let value;if(['all','initial'].includes(key)){if(eq>=0)throw new TaskError('--all does not take a value');value=true;}else{value=eq>=0?raw.slice(eq+1):argv[i++];if(value===undefined||value.startsWith('--'))throw new TaskError(`--${key} requires a value`);}args[key.replaceAll('-','_')]=value;}
   while(i<argv.length&&argv[i].startsWith('-')){if(['--help','-h'].includes(argv[i]))return {...args,help:help()};option(['store','lock-timeout']);}
   args.command=argv[i++];if(!has(COMMAND_OPTIONS,args.command))throw new TaskError('a valid command is required; use --help');
   const positional=[];while(i<argv.length){if(['--help','-h'].includes(argv[i]))return {...args,help:help(args.command)};if(argv[i].startsWith('--'))option(COMMAND_OPTIONS[args.command]);else positional.push(argv[i++]);}
-  const cmd=args.command,needsId=['update','step','event','observe','check','result','complete','show'].includes(cmd);
-  if(needsId){if(positional.length!==1)throw new TaskError(`${cmd} requires one task ID`);args.id=positional[0];}
+  const cmd=args.command,needsId=['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS].includes(cmd);
+  if(needsId){if(positional.length!==1)throw new TaskError(`${cmd} requires one ID`);args.id=positional[0];}
   else if(cmd==='render'){if(positional.length<1||positional.length>2||!['list','detail','bundle'].includes(positional[0]))throw new TaskError('render requires list, detail, or bundle');[args.view,args.id]=positional;}
   else if(positional.length)throw new TaskError(`unexpected argument: ${positional[0]}`);
   const defaults={init:{stale_hours:24,snapshot_note:''},register:{status:'queued',blocker:'',next_action:'',summary:'',source:''},event:{kind:'note',source:''},observe:{run_id:''},render:{language:'en',templates:DEFAULT_TEMPLATES}};
   for(const[k,v]of Object.entries(defaults[cmd]||{}))if(args[k]===undefined)args[k]=v;
   for(const k of ['lock_timeout','stale_hours'])if(args[k]!==undefined){if(typeof args[k]==='string'&&!args[k].trim())throw new TaskError(`${k} must be a number`);args[k]=Number(args[k]);}
   if(args.expected_revision!==undefined){if(!/^-?\d+$/.test(args.expected_revision))throw new TaskError('expected revision must be an integer');args.expected_revision=Number(args.expected_revision);if(!Number.isSafeInteger(args.expected_revision))throw new TaskError('expected revision must be a safe integer');}
+  if(args.source_version!==undefined){if(!/^\d+$/.test(args.source_version))throw new TaskError('source version must be a positive integer');args.source_version=Number(args.source_version);if(!Number.isSafeInteger(args.source_version)||args.source_version<1)throw new TaskError('source version must be a positive safe integer');}
   const required={register:['title','goal'],event:['text'],observe:['state','source'],check:['name','outcome','evidence'],result:['label','url'],complete:['summary','evidence']};
   for(const k of required[cmd]||[])if(args[k]===undefined)throw new TaskError(`--${k.replaceAll('_','-')} is required`);
   const choices={};if(['register','update'].includes(cmd))choices.status=STATES.filter(s=>s!=='completed');if(cmd==='list')choices.status=STATES;if(cmd==='step')choices.state=STEP_STATES;if(cmd==='observe')choices.state=EXEC_STATES;if(cmd==='event')choices.kind=['note','progress','decision','blocker'];if(cmd==='check')choices.outcome=['pass','fail'];if(cmd==='render')choices.language=['en','zh'];
@@ -252,17 +271,25 @@ function recognized_lock_candidate(store, name) {
 export async function run(args) {
   if(!Number.isFinite(args.lock_timeout)||args.lock_timeout<=0)throw new TaskError('lock timeout must be positive and finite');
   const store=new Store(args.store,args.lock_timeout),cmd=args.command;
+  if(cmd==='start')await run({...args,command:'init',stale_hours:24,snapshot_note:''});
+  const scheduler=create_scheduler({store,TaskError,encoded,read_json,nonempty,task_id,timestamp,timestamp_us,observed_time,newer_execution,now,event_record,display_time});
+  const integration=createIntegration({store,scheduler});
+  if(has(INTEGRATION_OPTIONS,cmd))return integration.run(args);
+  if(['wait','next-batch'].includes(cmd))return scheduler.wait(args);
   return store.locked(async()=>{
     if(cmd==='init'){
       if(!Number.isFinite(args.stale_hours)||args.stale_hours<=0)throw new TaskError('stale hours must be positive and finite');
-      if(fs.existsSync(store.path('store.json'))){store.config();store.all();return initialization_result(store,false);}
+      if(fs.existsSync(store.path('store.json'))){store.config();store.all();scheduler.inspect();readIntegration(store);return initialization_result(store,false);}
       if(fs.readdirSync(store.root).some(n=>n!=='.lock'&&n!=='.lock-node'&&!recognized_lock_candidate(store,n)))throw new TaskError('directory is not an empty task store; choose another directory');
       store.commit({'store.json':encoded({schema_version:VERSION,created_at:now(),stale_hours:args.stale_hours,snapshot_note:args.snapshot_note}),'tasks.json':'[]\n'});
       return initialization_result(store,true);
     }
     const config=store.config();
+    if(has(SCHEDULER_OPTIONS,cmd))return scheduler.execute(args);
     if(cmd==='register'){
-      const stamp=now(),t={schema_version:VERSION,id:args.id?task_id(args.id):'task-'+uid(16),title:nonempty(args.title,'title'),goal:nonempty(args.goal,'goal'),status:args.status,created_at:stamp,updated_at:stamp,revision:1,work_revision:1,last_checked_at:null,blocker:args.blocker.trim(),next_action:args.next_action.trim(),summary:args.summary.trim(),steps:[],events:[event_record('registered','Task registered',args.source,stamp)],checks:[],results:[],execution:{state:'unknown',observed_at:null,source:'',run_id:''},completion:null};store.save(t,true);return t;
+      const make=()=>{const stamp=now();return {schema_version:VERSION,id:args.id?task_id(args.id):'task-'+uid(16),title:nonempty(args.title,'title'),goal:nonempty(args.goal,'goal'),status:args.status,created_at:stamp,updated_at:stamp,revision:1,work_revision:1,last_checked_at:null,blocker:args.blocker.trim(),next_action:args.next_action.trim(),summary:args.summary.trim(),steps:[],events:[event_record('registered','Task registered',args.source,stamp)],checks:[],results:[],execution:{state:'unknown',observed_at:null,source:'',run_id:''},completion:null};};
+      if(args.source_ref!==undefined)return scheduler.register(args,make);
+      const t=make();store.save(t,true);return t;
     }
     if(cmd==='list')return visible_tasks(store.all(),new Date(),args.all).filter(t=>!args.status||t.status===args.status).map(index_row);
     if(cmd==='show')return store.get(args.id);
@@ -274,12 +301,13 @@ export async function run(args) {
         for(const name of Object.keys(projections(t))){const p=store.path(`tasks/${t.id}/${name}`);if(!fs.existsSync(p))throw new TaskError(`derived file mismatch: ${t.id}/${name}`);actual[name]=fs.readFileSync(p,'utf8');}
         if(!['en','zh'].some(language=>Object.entries(projections(t,language)).every(([name,expected])=>actual[name]===expected)))throw new TaskError(`derived file mismatch: ${t.id}`);
       }
+      scheduler.inspect();readIntegration(store);
       return {ok:true,tasks:tasks.length,checked_at:now(),scope:'local integrity; this does not execute tests or verify external claims'};
     }
     if(cmd==='render'){
       let content,tasks;
-      if(args.view==='detail'){if(!args.id)throw new TaskError('detail requires a task ID');content=render_task(store.get(args.id),config,fs.readFileSync(path.join(args.templates,'task-detail.md'),'utf8'),new Date(),args.language);}
-      else{if(args.id)throw new TaskError('only detail accepts a task ID');tasks=store.all();content=render_list(tasks,config,fs.readFileSync(path.join(args.templates,'list.md'),'utf8'),args.view==='bundle',new Date(),args.all,args.language);}
+      if(args.view==='detail'){if(!args.id)throw new TaskError('detail requires a task ID');content=render_task(decorateNotifications(store,scheduler.decorate([store.get(args.id)],args.language),args.language)[0],config,fs.readFileSync(path.join(args.templates,'task-detail.md'),'utf8'),new Date(),args.language);}
+      else{if(args.id)throw new TaskError('only detail accepts a task ID');tasks=decorateNotifications(store,scheduler.decorate(store.all(),args.language),args.language);content=render_list(tasks,config,fs.readFileSync(path.join(args.templates,'list.md'),'utf8'),args.view==='bundle',new Date(),args.all,args.language);}
       if(args.view==='bundle'){
         if(!args.output)throw new TaskError('bundle requires --output DIRECTORY');
         const output=canonical_path(args.output);write_output(path.join(output,'index.md'),content,store);
@@ -299,7 +327,7 @@ export async function run(args) {
         else{step={id:'step-'+uid(12),title:nonempty(args.title,'step title'),state:args.state||'queued',evidence:args.evidence||''};t.steps.push(step);}t.events.push(event_record('step',`Step: ${step.title} (${step.state})`));
       }else if(cmd==='event'){t.events.push(event_record(args.kind,args.text,args.source));}
       else if(cmd==='observe'){
-        const at=observed_time(args.observed_at),previous=t.execution.observed_at;if(previous&&timestamp_us(at)<timestamp_us(previous))throw new TaskError('older observation rejected; do not regress the latest execution snapshot');t.execution={state:args.state,observed_at:at,source:nonempty(args.source,'source'),run_id:args.run_id};if(!t.last_checked_at||timestamp_us(at)>timestamp_us(t.last_checked_at))t.last_checked_at=at;t.events.push(event_record('observation',`Execution observation: ${EXEC_LABELS[args.state]}`,args.source,at));
+        const at=observed_time(args.observed_at),next={state:args.state,observed_at:at,source:nonempty(args.source,'source'),run_id:args.run_id,...(args.source_version===undefined?{}:{source_version:args.source_version})};if(!newer_execution(t.execution,next))throw new TaskError('older observation or source version rejected; do not regress the latest execution snapshot');t.execution=next;if(!t.last_checked_at||timestamp_us(at)>timestamp_us(t.last_checked_at))t.last_checked_at=at;t.events.push(event_record('observation',`Execution observation: ${EXEC_LABELS[args.state]}`,args.source,at));
       }else if(cmd==='check'){
         if(t.status==='completed')throw new TaskError('reopen before recording a new acceptance check');const at=observed_time(args.checked_at);if(timestamp_us(at)<timestamp_us(t.updated_at))throw new TaskError('check predates latest update; record a current check or an ordinary historical event');t.checks.push({id:'check-'+uid(12),name:nonempty(args.name,'check name'),outcome:args.outcome,evidence:nonempty(args.evidence,'check evidence'),at,work_revision:t.work_revision});t.last_checked_at=at;t.events.push(event_record('check',`Verification ${args.name}: ${args.outcome}`,'',at));
       }else if(cmd==='result'){

@@ -10,9 +10,9 @@ import { findProject } from './project.mjs';
 export const FILES = Object.freeze([
   'SKILL.md', 'agents/openai.yaml', 'config.example.yml', 'feishu.sh',
   'package.json', 'scripts/project.mjs', 'scripts/config.mjs', 'scripts/messages.mjs',
-  'scripts/transport.mjs', 'scripts/runtime.mjs', 'scripts/server.mjs',
+  'scripts/transport.mjs', 'scripts/runtime.mjs', 'scripts/server.mjs', 'scripts/formats.mjs',
   'scripts/package.mjs', 'scripts/validate.mjs', 'tests/server.test.mjs',
-  'tests/transport.test.mjs', 'references/operations.md', 'references/validation.md'
+  'tests/transport.test.mjs', 'tests/lifecycle.test.mjs', 'tests/interfaces.test.mjs', 'references/operations.md', 'references/validation.md', 'references/interface.md', 'references/remote-configuration.md', 'tests/routing.test.mjs'
 ]);
 export const ARCHIVE_FILES = Object.freeze([...FILES, 'pnpm-lock.yaml']);
 
@@ -44,7 +44,10 @@ export function makePackage(destination = path.join(ROOT, 'dist', 'feishu-messag
     const metadata = portableMetadata();
     fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify(metadata.pkg, null, 2) + '\n', {mode: 0o644});
     fs.writeFileSync(path.join(folder, 'pnpm-lock.yaml'), stringify(metadata.lock), {mode: 0o644});
-    const result = spawnSync('tar', ['-czf', target, '-C', staging, 'feishu-message-server'], {stdio: 'pipe', shell: false});
+    // BSD tar otherwise emits AppleDouble sidecars that its own listing hides.
+    const result = spawnSync('tar', ['-czf', target, '-C', staging, 'feishu-message-server'], {
+      stdio: 'pipe', shell: false, env: {...process.env, COPYFILE_DISABLE: '1'}
+    });
     if (result.status !== 0) { fs.rmSync(target, {force: true}); throw new SafeError('Packaging failed; tar is required'); }
     return target;
   } finally { fs.rmSync(staging, {recursive: true, force: true}); }

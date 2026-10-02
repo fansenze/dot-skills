@@ -1,6 +1,6 @@
 ---
 name: feishu-message-server
-description: Configure and start a Node.js Feishu message server, including importing a user-selected local configuration file to dot. Receive private messages to the bot and group messages that mention it, and send or reply with text when requested. Use for setup, startup, inbox inspection, messaging, troubleshooting, and migration.
+description: Configure and start a Node.js Feishu message server, including remote-config-bridge orchestration that keeps a user-computer configuration on that computer. Receive private messages to the bot and group messages that mention it, and send or reply with text, Markdown, or cards when requested. Use for setup, startup, inbox inspection, messaging, troubleshooting, and migration.
 ---
 
 # Feishu Message Server
@@ -11,35 +11,35 @@ Run the examples from this skill directory. Requirements: Node.js 22.18+ and pnp
 
 ## Configuration and startup
 
-Setup and configuration requests include starting the server as soon as configuration succeeds, unless the user explicitly asks to prepare configuration without starting. Complete this in the same interaction without another startup confirmation or manual terminal steps. Inbox inspection, sending, and other existing-instance operations do not themselves require a new listener.
+Install/setup prepares dependencies; configuration prepares only the selected configuration. Neither starts a listener, persists credentials beyond the requested location, or enables notifications by itself. Start when the user requests startup, including an explicit “install and start manage-dot-tasks” request that includes this transport. Reuse a matching healthy instance. Existing authorization carries forward without another confirmation. Inbox inspection and sending do not require a new listener.
 
-Complete these steps in order, without running them in parallel. If blocked, report why and stop dependent steps.
+Choose the execution environment before any configuration command. Carry the user's exact existing authorization forward; do not repeat confirmations or scan unrelated configuration files.
 
-1. **Transfer local configuration to dot.** For a selected connected-computer file, follow the [local configuration handoff](#local-configuration-files-for-dot) first. Continue only after `materialized_and_verified`, using `consumer_local_root` as `SOURCE`. Reuse a verified copy of the same selection. Skip transfer for a file already on dot, directly supplied values, or a local-only server.
-2. **Resolve configuration and dependencies.** Keep `SOURCE` from step 1, or use the selected file or values in the execution environment. Without a new selection, reuse the conversation's runtime configuration or `.local/config.yml`. Reused configuration must match the current selection. Run `bash feishu.sh setup` only if dependencies are missing.
-3. **Prepare configuration.** Run `prepare --config SOURCE`, or supply values through standard input to `prepare --stdin-json` (`{}` if none). If `missing` is returned, ask only for those key names, e.g. "Please provide app_id and app_secret." Merge missing values into a partial file with `prepare --config SOURCE --stdin-json`. Preparation leaves the source unchanged.
-4. **Start immediately.** After `prepare` returns `ok: true`, run `start --config RETURNED_CONFIG`, unless preparation only was requested. With `init`, start with the initialized file. Reuse a matching running instance. Do not insert checks, tests, test messages, packaging, or another confirmation before startup.
-5. **Report readiness.** Follow the [startup and target checks](#report-startup-and-target-readiness) to report the verified connection state and relevant destinations.
+1. **Route remote configuration through remote-config-bridge.** When dot orchestrates a configuration on the user's computer, invoke the installed `remote-config-bridge` skill and follow [remote configuration](references/remote-configuration.md). Keep the configuration, credentials, Feishu CLI and receiver on that computer. Stop this direct setup flow after delegation. The bridge's selected local task calls the Feishu CLI directly, without invoking this setup skill again. Dot must not spawn its cloud-local server with a user-computer path or upload that configuration to Library.
+2. **For same-environment use, resolve dependencies and the selected existing configuration.** A local-only server or a configuration already on dot can use the CLI directly in that environment. Reuse the selected path and matching receiver state. Run `bash feishu.sh setup` there only if dependencies are missing. If ownership is unclear, resolve the selected environment rather than inferring it from path syntax.
+3. **Reuse before preparing.** `check --config FILE` reports missing required keys; `identity --config FILE` reports nonsecret app ID/brand; `capabilities` describes the interface. A usable existing configuration needs no copy, `prepare` or `init`. For requested preparation, use `prepare --config SOURCE` or local standard input and keep the source unchanged. For a remote configuration, the local task handles missing values on that computer; report only missing key names to dot.
+4. **Start only within the requested scope.** Reuse a matching running instance; otherwise run `start` with the selected or prepared configuration and the actual receiver state directory when startup is authorized. Retain the process/session reference and collect readiness evidence. Configuration-only requests end after configuration/binding. Do not send a test message or persist credentials elsewhere as a setup side effect.
+5. **Report separate readiness.** State configuration/worker readiness, receiver connection, verified receipt/send evidence and confirmed/missing targets. Ask only for missing recipient, scope or permission information; a configuration path alone does not authorize messaging.
 
 ### Local configuration files for dot
 
-Install and read the complete `files/transfer-local-files-to-dot` skill through dot's supported installation workflow; reuse a current installed copy. Its source is `../../files/transfer-local-files-to-dot` in this checkout. Standalone Feishu exports must obtain it from the [dot-skills repository](https://github.com/fansenze/dot-skills). Include its helper and references, and resolve the helper on the producer computer.
+The remote route is **remote-config-bridge**. Resolve its complete installed skill by name; in this repository it is `skills/messaging/remote-config-bridge`. The combined task/Feishu export includes it as a sibling. A standalone Feishu export includes the [routing recipe](references/remote-configuration.md); resolve the companion through the installed catalog or the [repository](https://github.com/fansenze/dot-skills), including all scripts and references. If the catalog is incomplete, inspect relevant `.agents/skills` in the authorized checkout. Report a missing bridge or unavailable local-task tools instead of falling back to credential transfer.
 
-Invoke it for the exact selected YAML/JSON file and Feishu setup on dot, carrying the existing user authorization. Follow its Feishu configuration handoff and current Library transport. Transfer without reading or displaying contents or putting `app_secret` in prompts, command arguments, or logs. A producer path, upload ID, or `uploaded` status is not consumer verification. Report installation or transfer blockers; do not substitute a generic upload method.
+This bridge transports authorized operation batches and receipts, not arbitrary file bytes. It is not a replacement for upload/download tools. Reviewed code distribution may still use supported file transfer; selected configuration and credentials remain on their original computer. Dot holds public bindings, task state, batches, receipts and bounded inbox pages. All remote `setup`, `check`, `identity`, `capabilities`, `prepare` when needed, and `start`/reuse actions execute inside the selected local task.
 
-Required keys: `app_id`, `app_secret`. Optional keys: `brand`, `bot_open_id`. The default `brand` is `feishu`; use the international platform only when `lark` is explicitly selected.
+Required configuration keys remain `app_id`, `app_secret`; optional keys are `brand`, `bot_open_id`. Default brand is `feishu`; use `lark` only when explicitly selected. Never ask for a secret in dot chat just to establish the bridge.
 
-Use `check` only for requested diagnostics; `prepare` already reports missing keys.
+Same-environment CLI example (run on the computer that actually owns the configuration):
 
 ```bash
-bash feishu.sh prepare --config /path/to/config.yml
-# Immediately use the config path returned by prepare:
-bash feishu.sh start --config /path/to/temporary/config.yml
+node scripts/server.mjs check --config "$SELECTED_CONFIG"
+node scripts/server.mjs identity --config "$SELECTED_CONFIG"
+node scripts/server.mjs capabilities
+# Only if startup is authorized and no matching receiver is already running:
+node scripts/server.mjs start --config "$SELECTED_CONFIG" --state-dir "$RECEIVER_STATE"
 ```
 
-Use the same runtime configuration path for subsequent `start`, `send`, and `reply` commands. Keep the temporary file while the instance and follow-up operations need it. After the instance stops and the file is no longer needed, remove only the temporary directory created by this invocation of `prepare`. The persistent `init` entry point remains available, but is not required for the skill interaction.
-
-Launch the foreground server in the execution environment's supported long-running process session and retain its session handle. The one-line startup wrapper is `bash /path/to/feishu-message-server/feishu.sh start --config /path/to/config.yml`.
+Keep any explicitly prepared temporary configuration while its instance and follow-up operations need it. After that instance stops and the file is no longer needed, remove only its own temporary preparation directory. Persistent `init` is for an authorized configuration write, not a requirement of bridge setup.
 
 ### Report startup and target readiness
 
@@ -77,7 +77,7 @@ Use the destination and content requested by the user, including chats or messag
 
 Keep confirmed mappings and their evidence in the conversation and existing private inbox. If the user requests a separate saved mapping, follow the [runtime storage rules](references/operations.md#runtime-files); do not add destination fields to app configuration or include real IDs, message content, or credentials in reusable skill files.
 
-`inbox` shows message metadata by default; `--show-text` also includes content. Outgoing text can also come from `--stdin` or `--text-file`. API code 0 with a returned message ID confirms API acceptance, not that the user read the message. Report each requested send's actual result:
+`inbox` shows message metadata by default; `--show-text` also includes content. Outgoing content can also come from `--stdin` or `--text-file`. Explicit `--format markdown` sends a Markdown card; `--format card` consumes a native JSON card. Text remains the default. Unsupported formats and Markdown pipe tables fail without a send; never silently downgrade the requested format. API code 0 with a returned message ID confirms API acceptance, not that the user read the message. Report each requested send's actual result:
 
 - `not_sent` with `request_phase: authentication`: authentication failed before the message API was called in this attempt. This does not resolve an earlier attempt's unknown delivery.
 - `api_error`: report the numeric API code and HTTP status when present.
@@ -86,6 +86,12 @@ Keep confirmed mappings and their evidence in the conversation and existing priv
 Preserve the CLI's safe `error_type`, allowlisted `error_code`, `request_phase`, and per-request `elapsed_ms` when present. Never expose raw exceptions, request/response dumps, credentials, headers, or message bodies as diagnostics. If a tool approval is pending, rejected, or interrupted before execution, report that tool state separately from Feishu results. An interrupted tool result without execution evidence cannot establish an API timeout or delivery outcome.
 
 Sending never retries automatically. For an authorized retry of the same operation, preserve the exact destination and ID type, text, reply options, and returned `idempotency_key`. A change to the text or destination is a new message and needs a new key; do not add a timestamp or otherwise alter content during a retry. If the original key is unavailable after an uncertain attempt, report the duplicate risk and clarify before resending.
+
+### Task connector interface
+
+`capabilities` declares protocol 1 and supported formats without reading credentials. `identity --config FILE` reports only app ID and platform. `inbox-page` supplies a durable ordered cursor; `inbox --limit N` is only a recent view and must not drive reliable ingestion. See the independent [server interface](references/interface.md) for schemas, acknowledgement boundaries, migration, and examples.
+
+Manage Dot Tasks owns authorization, task interpretation, scheduling and its transactional outbox. This server only receives/stores/transmits. For same-environment transport the agent uses the task skill’s bundled Feishu adapter. For a user-computer configuration orchestrated by dot, it uses `remote-config-bridge/scripts/adapter.mjs` on dot and the fixed Feishu CLI on the selected computer. The user writes no glue code. A message in this server’s inbox alone never authorizes a task or reply.
 
 ### Diagnose a send timeout
 
@@ -105,6 +111,6 @@ bash feishu.sh test
 bash feishu.sh package
 ```
 
-To migrate, create and copy `dist/feishu-message-server-node.tgz`, extract it, and follow the ordered configuration workflow above. Import a selected local configuration to dot before dependency setup when that transfer is needed. The archive includes code, templates, documentation, and a standalone pnpm lockfile derived from the shared repository lock. Local configuration, logs, inbox data, and installed dependencies are excluded.
+To migrate, create and copy `dist/feishu-message-server-node.tgz`, extract it, and follow the ordered configuration workflow above. Route a selected user-computer configuration through remote-config-bridge and install needed dependencies on that computer; do not migrate credentials as part of setup. The archive includes code, templates, documentation, and a standalone pnpm lockfile derived from the shared repository lock. Local configuration, logs, inbox data, and installed dependencies are excluded.
 
 [Operations](references/operations.md) covers network behavior, file locations, platform permissions, and troubleshooting. [Validation](references/validation.md) records completed checks and remaining coverage limits.

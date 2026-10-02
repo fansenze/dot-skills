@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remote Config Bridge"
+  short_description: "Bridge remote operations while credentials stay local"
+  default_prompt: "Use $remote-config-bridge to reuse my selected computer's Feishu configuration through one verified local task, keeping credentials there and transporting only authorized operation batches and receipts."

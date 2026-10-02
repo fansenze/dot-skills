@@ -6,6 +6,8 @@
 task-store/
   store.json                    # Schema, creation time, freshness threshold, note
   tasks.json                    # Lightweight id/title/status/updated_at index
+  scheduler.json                # Optional durable events, requests, bindings and coverage
+  integration.json              # Optional connector policies, outbox, inbox dedup and checkpoints
   tasks/
     task-.../
       task.json                 # Authoritative task record
@@ -59,7 +61,7 @@ Timestamps are UTC ISO 8601 with six fractional digits and `Z`. Existing microse
 
 `last_checked_at` records the latest execution-source observation or acceptance check; it does not imply live health, source reliability, or a passing result. Inspect the source and evidence. Active observations older than `stale_hours` (default 24) are stale. Unchecked tasks remain unknown; terminal tasks describe recorded outcomes, not live execution promises.
 
-`execution` contains the latest observed run reference, not every historical run. Events retain earlier observations. `inProgress` may be stale and `completed` means a turn ended. The script does not poll, subscribe, or schedule work.
+`execution` contains the latest observed run reference, not every historical run. Events retain earlier observations. `inProgress` may be stale and `completed` means a turn ended. When a source supplies a monotonic version, `source_version` prevents equal/older versions or unversioned observations of the same source/run from replacing it. Timestamps cannot regress either. The scheduler consumes local durable events; querying or creating platform tasks belongs to dot's actual tools. See [scheduling.md](scheduling.md) for the active wait loop, delivery state machine, and recovery contract.
 
 ## Local initialization and platform memory
 
@@ -69,13 +71,15 @@ The invoking assistant follows [first-use.md](first-use.md) using actual user au
 
 ## Atomic writes, concurrency, and recovery
 
-All Node CLI reads and writes hold the store's `.lock-node` directory lock. A complete candidate directory containing a unique owner token, PID, and hostname is prepared on the same disk, then renamed atomically to the fixed lock path. An occupied nonempty lock cannot be replaced. If the same-host owner is confirmed dead, only its unique token is removed and a nonrecursive directory removal reclaims the empty lock. An old reaper cannot recursively erase a new owner's generation. Live or unprobeable owners are preserved; possible PID reuse can cause a conservative busy timeout.
+All Node CLI reads and writes hold the store's `.lock-node` directory lock. `wait` releases it between bounded queue scans. A complete candidate directory containing a unique owner token, PID, and hostname is prepared on the same disk, then renamed atomically to the fixed lock path. An occupied nonempty lock cannot be replaced. If the same-host owner is confirmed dead, only its unique token is removed and a nonrecursive directory removal reclaims the empty lock. An old reaper cannot recursively erase a new owner's generation. Live or unprobeable owners are preserved; possible PID reuse can cause a conservative busy timeout.
 
-Writes use same-directory temporary files, fsync, and atomic replacement. Each transaction first persists its complete recovery journal, then applies task, projection, and index writes. The next CLI operation replays an interrupted transaction while holding the lock.
+The store root is canonicalized before locking. Its ephemeral `.lock-node` leaf is checked with `lstat` inside the acquisition loop, without a subsequent `realpath` call that could race with the owner's release. A disappearing lock/owner is retried; symlinks, non-directory lock entries, permission failures, and other filesystem errors are not treated as an absent lock.
+
+Writes use same-directory temporary files, fsync, and atomic replacement. Each transaction first persists its complete recovery journal, then applies task, projection, index, and any scheduler writes. The next CLI operation replays an interrupted transaction while holding the lock. Scheduling state is created lazily; opening or initializing a legacy store does not add it.
 
 Consistency guarantees apply to single-host processes using this CLI. Direct filesystem readers may observe a transaction between writes. Avoid NFS, object-store mounts, multi-host writers, or incompatible implementations without verified locking semantics. Stop old writers before switching from a `flock` implementation; its lock and this directory lock do not interoperate. A legacy `.lock` file can remain. Crashes may leave candidate directories; unknown contents are never automatically removed.
 
-After a disconnect following a possible commit, inspect the latest record before retrying. Events do not have automatic deduplication. Duplicate task IDs and duplicate result URLs are rejected.
+After a disconnect following a possible commit, inspect the latest record before retrying. Ordinary ledger `event` entries do not have automatic deduplication. Scheduling events and requests use stable caller-supplied IDs; recorded scheduling receipts and acknowledgement retries are idempotent. Source-bound registration is idempotent; ordinary duplicate task IDs and duplicate result URLs are rejected.
 
 Malformed JSON, unknown schema versions, inconsistent indexes, orphaned directories, and incorrect projections cause `doctor` to fail. Preserve originals and diagnostics before deciding on repairs; do not delete a pending recovery journal manually.
 
@@ -85,4 +89,8 @@ Store roots permit system and user directory aliases. Node filesystem APIs resol
 
 New automatic event labels and generated projection headings are English. User task content and historical events keep their original language. Existing schema-1 projection sets in the legacy format remain valid without read-time rewrites. After an authorized mutation, that task's complete projection set is regenerated in English. Integrity checks accept either complete known format, not arbitrary text or a mixture of formats. No task-schema migration is required.
 
-Optional `summary` provides concise progress; older records may omit it. Summary-only edits do not increment the work revision or invalidate checks. Default list filtering hides only completed records inactive for ten minutes. `completion.at` remains the actual completion time, even after later events. Read operations change neither timestamp.
+Optional `summary` provides concise progress; older records may omit it. Summary-only edits do not increment the work revision or invalidate checks. Default list filtering hides only completed records inactive for ten minutes; rendered tasks with active scheduling remain visible. `completion.at` remains the actual completion time, even after later events. Read operations change neither timestamp. Scheduling details are joined for rendering, not persisted into the task schema or projections.
+
+## Notification and inbox transactions
+
+The optional schema-1 integration records and their transitions are defined in [connectors.md](connectors.md). A meaningful task mutation and its destination-scoped notification snapshots share one recovery journal. A consumed inbound command, dedup record, cursor and resulting scheduler request or reply likewise share a journal. Delivery acknowledgements never change task status or create another task event. Adapter bindings and queued routes are immutable; unknown delivery requires reconciliation. Rendered pending/failed/unknown delivery summaries join the existing UI without rewriting task records. Old stores need no migration until integration is configured.

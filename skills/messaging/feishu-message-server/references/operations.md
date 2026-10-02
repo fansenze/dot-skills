@@ -2,13 +2,14 @@
 
 ## Configuration workflow
 
-Follow the [ordered configuration and startup workflow](../SKILL.md#configuration-and-startup). When importing a local file to dot, complete the [configuration handoff](../SKILL.md#local-configuration-files-for-dot) before running the commands below.
+Follow the [ordered configuration and startup workflow](../SKILL.md#configuration-and-startup). When dot orchestrates a user-computer configuration, complete the [remote routing recipe](remote-configuration.md) and execute the commands below only in the selected local task. Same-environment configurations remain direct. The configuration is not uploaded or copied to dot.
 
-- Existing file: `prepare --config FILE` copies it into the current environment's temporary directory.
+- Usable existing file: reuse it with `check`/`identity`; no preparation or credential copy is needed.
+- Requested preparation: `prepare --config FILE` copies it within its owning environment's temporary directory.
 - Values supplied during the interaction: pass them through standard input to `prepare --stdin-json` to write a temporary JSON file.
 - Partial existing file: `prepare --config FILE --stdin-json` merges the additional values into a temporary file.
 
-Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. Immediately run `start --config` with that path, or reuse a matching running instance. Setup and configuration include startup unless the user explicitly requests preparation without starting. If keys are missing, ask only for the names in `missing`, complete preparation, and continue directly to startup. The source file is not overwritten.
+Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. Run `start --config` with that path only when startup is in the user’s requested scope; reuse a matching running instance. Setup and configuration alone do not imply startup, persistent credential storage, or notification subscriptions. If keys are missing, ask only for those keys and continue already authorized steps after preparation. The source file is not overwritten.
 
 The supported fields are `app_id`, `app_secret`, `brand`, and `bot_open_id`. The first two are required. The default brand is `feishu`. Newly generated configurations contain only the supported fields that are needed; the default brand can be omitted.
 
@@ -69,12 +70,14 @@ After a requested send, report success only for API code 0 with a returned messa
 | `check` | Check for missing configuration |
 | `start` | Use the configuration with the selected platform's official APIs for app authentication, bot information, and WebSocket endpoint discovery, then establish a long connection |
 | `inbox` | Read local SQLite inbox records |
-| `send` / `reply` | Use the official SDK to send text to the selected chat or reply to a selected message |
+| `send` / `reply` | Use the official SDK to send the explicit text/Markdown/card format to the selected chat or message |
+| `capabilities` / `identity` | Declare protocol/format support without credentials; inspect selected app ID/brand without a network request |
+| `inbox-page` | Read an ordered, restart-safe page with per-message and final cursors; see [interface](interface.md) |
 | `test` | Run simulated tests, including a local loopback HTTP fixture |
 | `validate` | Check skill metadata, dependency versions, and portable files |
 | `package` | Create an archive from a fixed file manifest |
 
-`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. Within the Feishu CLI, the only other external network operation is `setup` downloading dependencies. Importing a local configuration additionally uses the transfer skill's official ChatGPT Library transport. The running server does not expose a local HTTP interface.
+`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. Within the Feishu CLI, the only other external network operation is `setup` downloading dependencies. Remote configuration uses remote-config-bridge operation batches through actual task tools; the configuration stays on its computer. Code distribution may independently require supported file transfer. The running server does not expose a local HTTP interface.
 
 ## Feishu app settings
 
@@ -164,7 +167,7 @@ There is no automatic send retry, timeout extension, or retry loop. When the use
 
 Run `bash feishu.sh package` from the skill directory, or `pnpm package:feishu` from the repository root. If the output file already exists, choose another output filename. The archive contains code, tests, a blank configuration template, documentation, and a generated standalone pnpm lockfile. Packaging selects this skill's importer from the shared lockfile and preserves its dependency resolutions; the exported manifest also receives the root's pinned pnpm version. It excludes local configuration, inbox data, logs, caches, and node_modules.
 
-Copy the archive to another computer, extract it, and follow the [configuration workflow](#configuration-workflow).
+Copy the code archive to another computer, extract it, and follow the [configuration workflow](#configuration-workflow). For a user-computer configuration controlled from dot, keep that file and server there and resolve remote-config-bridge via the [remote recipe](remote-configuration.md).
 
 In a repository checkout, `setup` locates the root workspace automatically. It also accepts pnpm install options, for example `setup --offline` when the needed packages are already cached. Copy the generated archive when moving only this skill; copying its raw source folder alone does not include the repository's shared lockfile.
 

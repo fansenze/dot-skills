@@ -41,11 +41,11 @@ The example URL illustrates syntax; replace it with a verified result. `complete
 ## Command reference
 
 - `init [--stale-hours 24] [--snapshot-note TEXT]`: initialize or reuse a local store; platform memory remains unverified by the CLI.
-- `register --title TEXT --goal TEXT [--id ID] [--status STATE] [--blocker TEXT] [--next-action TEXT] [--summary TEXT] [--source TEXT]`
+- `register --title TEXT --goal TEXT [--id ID] [--status STATE] [--blocker TEXT] [--next-action TEXT] [--summary TEXT] [--source TEXT] [--source-ref REF]`: with both source fields, atomically create or reuse a source identity without overwriting an existing task.
 - `update ID [--title TEXT] [--goal TEXT] [--status STATE --reason TEXT] [--blocker TEXT] [--next-action TEXT] [--summary TEXT]`
 - `step ID [--step-id STEP_ID] [--title TEXT] [--state queued|executing|completed|skipped] [--evidence TEXT]`
 - `event ID --text TEXT [--kind note|progress|decision|blocker] [--source TEXT]`: append a user-appropriate factual event.
-- `observe ID --state STATE --source TEXT [--observed-at TIMESTAMP] [--run-id REFERENCE]`
+- `observe ID --state STATE --source TEXT [--observed-at TIMESTAMP] [--run-id REFERENCE] [--source-version N]`
 - `check ID --name TEXT --outcome pass|fail --evidence TEXT [--checked-at TIMESTAMP]`
 - `result ID --label TEXT --url URL`: record a verified HTTPS, HTTP, or Library result link; credential-bearing and script URLs are rejected.
 - `complete ID --summary TEXT --evidence TEXT`: record verified completion using current checks.
@@ -59,6 +59,51 @@ The example URL illustrates syntax; replace it with a verified result. `complete
 - `doctor` / `verify`: check local structure, index, projections, and completion records. These commands do not perform external acceptance checks or verify memory.
 
 Single-task mutation commands accept `--expected-revision N`. Read the current `revision` from `show` before writing to prevent stale updates.
+
+## Scheduling commands
+
+Read [scheduling.md](scheduling.md) for the required authorization, source discovery,
+active loop and reconciliation rules. Task IDs below refer to existing task
+records; request IDs are local scheduling identities, never platform task IDs.
+
+- `bind TASK_ID --source SOURCE --source-ref REF`: bind another verified identity; reject conflicts.
+- `lookup --source SOURCE --source-ref REF`: return a binding or JSON `null`.
+- `coverage`: read recorded source coverage. To write a source/scope observation, use `coverage --source SOURCE --scope SCOPE --state partial|complete|unavailable --evidence TEXT [--observed-at TIMESTAMP]`. No platform query occurs.
+- `schedule TASK_ID --event-id EVENT_ID --request-id REQUEST_ID --source SOURCE --source-ref REF --action execute|observe|verify --authorization-ref REF --work-revision N [--step-id ID] [--check-name TEXT] [--not-before TIMESTAMP] [--max-attempts N]`: durable immediate/delayed scheduling. Verification requires a check name; other actions reject it. Default attempt budget 5, range 1–100.
+- `queue [--task-id ID] [--all]`: return requests; done/cancelled are hidden by default. Tokens are excluded.
+- `wait --consumer ID [--timeout-ms N] [--lease-ms N] [--limit N] [--poll-ms N]`: claim due work or report timeout. Timeout defaults to 30000 (0–60000), lease to 60000 (50–3600000), limit to 10 (1–100), poll to 100 (20–1000). Result: `batch`, `timed_out`, `waited_ms`, and a timeout `reason` when applicable. Each item includes its `token` and `mode` (`execute`, `reconcile`, `ack`).
+- `next-batch --consumer ID [--lease-ms N] [--limit N]`: one immediate attempt; busy/empty returns an empty batch with a reason.
+- `begin REQUEST_ID --token TOKEN`: persist execution intent. Invoke a new external action only when `proceed: true`; repeated intent returns `proceed: false` and its recovery mode.
+- `renew REQUEST_ID --token TOKEN [--lease-ms N]`: extend a still-valid lease. Renewal does not grant another execution attempt.
+- `record REQUEST_ID --token TOKEN --source SOURCE --run-id REAL_REFERENCE --state STATE --evidence TEXT [--observed-at TIMESTAMP] [--source-version N] [--outcome pass|fail]`: atomically record actual task execution evidence and an idempotent receipt. `--outcome` is required only for verification; `check_id: null` means a superseded check was not applied to the current work. Use the source's actual monotonic version when available; do not invent it.
+- `ack REQUEST_ID --token TOKEN`: acknowledge a recorded result; repeat with the same successful token safely.
+- `nack REQUEST_ID --token TOKEN --error-code handler-failed|tool-unavailable|permission-denied|environment-failed|rate-limited|lease-expired [--retry-after-ms N]`: retry with a bounded budget, retaining intent/result. Explicit delay range 0–86400000; default backoff 1–60 seconds.
+- `resolve REQUEST_ID --token TOKEN --evidence TEXT`: only after authoritative proof no external execution started and no old worker can still act; clear the intent into the normal retry/dead path and retain evidence.
+- `reschedule REQUEST_ID --reason TEXT`: explicitly renew an exhausted/released request's attempt budget; existing intent stays in reconciliation mode. Changed work requires a new request. Not an automatic retry loop.
+- `unschedule REQUEST_ID --reason TEXT`: cancel unstarted work without a live lease. Existing execution intents must first be reconciled and acknowledged.
+
+The consumer must continue waiting/reading a yielded tool process before rearming.
+Scheduling commands do not spawn a daemon, run arbitrary shell text, send a message, or call a
+platform API. Explicit integration policies permit `deliver`/`start` to send queued notifications. Defaults can be shortened for isolated tests; practical tool work
+usually needs a longer lease and small batches.
+
+## Message integration commands
+
+Read [connectors.md](connectors.md) before configuring a transport or starting its consumer. All configuration IDs are immutable except their enabled status. Defaults never select a recipient.
+
+- `connect --id ID --module ABSOLUTE_PATH --settings-file JSON_FILE`: verify protocol/capabilities, pin adapter entry hash and nonsecret settings; identical registration reuses the binding.
+- `connections` / `disconnect ID`: inspect bindings or disable one.
+- `watch --id ID --connector ID --account ID --destination ID --tasks all|ID,ID --events EVENT,EVENT [--destination-type chat_id] [--format card|markdown|text] [--language en|zh] [--initial]`: authorize matching outbound snapshots; format defaults to card. Events: registered, progress, blocked, failed, completed, verification, result, execution. `--initial` applies only to first creation.
+- `unwatch ID`: disable a subscription; pending entries cancel on next claim.
+- `allow-inbound --id ID --connector ID --account ID --tenant ID --sender ID --destination ID --commands list,show,run,verify --tasks all|ID,ID [--since ISO_TIMESTAMP] [--format card|markdown|text] [--reply-mode reply|send]`: record exact verified inbound scope; default since is now, format card, mode reply. Re-registering retains the original since time. Run/verify-only grants require durable receive support but no send/reply/format capability; any list/show command additionally requires the selected response method and format.
+- `deny-inbound ID`: disable a grant.
+- `ingest --connector ID [--limit N]`: process one durable page (default 100, 1–1000); return ingested count and has_more. With no enabled grants, read nothing.
+- `inbound`: inspect checkpoints and scoped accepted/rejected outcomes without raw message text.
+- `outbox [--all]`: inspect notification IDs, routes, states, attempts and safe receipts; default hides API-accepted/cancelled entries.
+- `deliver --consumer ID [--limit N] [--lease-ms N]`: deliver up to N entries (default 10, 1–100); default lease 120000 ms (1–3600000). Too-short leases can leave delivery unknown.
+- `resolve-notice ID --status api_accepted|not_sent --evidence TEXT [--message-id REAL_ID]`: reconcile an unknown delivery only from authoritative evidence; accepted requires message ID.
+- `retry-notice ID --reason TEXT`: explicitly renew a dead/API-error notice's budget using the frozen route/body/key. Unknown delivery must be resolved first.
+- `start [--consumer dot-active] [--timeout-ms 30000] [--lease-ms N] [--limit N]`: initialize/reuse local store, ingest permitted inboxes, deliver outbox, return scheduled work. Idle wait budget 0–60000 ms; bounded connector work adds time. Return scheduler fields plus ingested, notifications, receive_gaps and non-attesting readiness. Repeat actively after processing/acknowledgement; no daemon is created.
 
 ## Blockers and recovery
 
@@ -81,7 +126,7 @@ taskctl observe task-release --state completed --source "Actual turn result"
 
 The second command does not mark the user task complete. Inspect results, perform acceptance checks, and record them separately. An observation does not prove continued availability. A disconnected execution may be recorded as `disconnected`; task-level blocking depends on whether it still prevents progress.
 
-Timestamps are timezone-aware ISO 8601 values and default to the current time. Future observations, regressing execution observations, and checks predating the latest task update are rejected. Describe historical evidence as an event rather than presenting it as a fresh check.
+Timestamps are timezone-aware ISO 8601 values and default to the current time. Future observations, regressing execution observations or source versions, and checks predating the latest task update are rejected by `observe`/`check`. Scheduled receipts preserve delayed facts in history without overwriting a newer execution snapshot. A monotonic `source-version` is scoped to one source and execution reference; keep supplying it once that reference has versioned observations. Describe historical evidence as an event rather than presenting it as a fresh check.
 
 ## Concise views and delivery
 
@@ -95,6 +140,6 @@ Use `render bundle` for navigation between generated files. Individual `--output
 
 Node.js 22.18.0+ uses the same commands on Linux and macOS. There are no Python, npm, or system `flock` runtime dependencies. Existing schema-1 records and history remain readable. Read-only commands preserve legacy projection bytes; a later authorized mutation regenerates that task's projections with English headings. The record's user text and historical events are preserved. Stop old writers before switching implementations; incompatible locking schemes cannot safely share a store.
 
-Run `node --test "$SKILL_DIR/tests/taskctl.test.mjs"` for automated local tests. Review [../tests/first-use-scenarios.md](../tests/first-use-scenarios.md) separately for simulated assistant decisions; real memory persistence must be checked in the target runtime.
+Run `node --test "$SKILL_DIR/tests/"*.test.mjs` for automated local tests. Review [../tests/first-use-scenarios.md](../tests/first-use-scenarios.md) and [../tests/scheduling-scenarios.md](../tests/scheduling-scenarios.md) separately for simulated assistant decisions; real execution and memory persistence must be checked in the target runtime.
 
 Package with `node "$SKILL_DIR/scripts/package.mjs" /absolute/output/manage-dot-tasks.zip`. The ZIP contains skill code, templates, instructions, and synthetic test data only. It does not include real task stores, webhook credentials, notification adapters, or a platform memory implementation.

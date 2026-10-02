@@ -1,4 +1,4 @@
 interface:
   display_name: "Feishu Message Server"
-  short_description: "Portable Feishu listener and explicit message send/reply CLI"
-  default_prompt: "Use $feishu-message-server to configure and run a local Feishu message server."
+  short_description: "Feishu listener and explicit text, Markdown, or card messaging"
+  default_prompt: "Use $feishu-message-server to configure and run Feishu; route a user-computer configuration controlled by dot through $remote-config-bridge so credentials and transport remain there."

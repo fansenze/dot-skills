@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "scope": "remote-operations-only",
+  "platform_steps_are": "Recipes mapped by the active agent to current tool schemas; tests simulate these boundaries and never invoke platform tools.",
+  "task_selection": {
+    "reuse": "Read and reuse the existing verified task on the selected computer.",
+    "if_missing": {
+      "actor": "dot",
+      "tool": "cloud_threads.create",
+      "environment": "actual selected-computer environment from discovery",
+      "retain": "actual returned task ID"
+    }
+  },
+  "job": {
+    "id": "send-c84056724a1b795965a284a26baf019fdead7811700d7467",
+    "operation": "send",
+    "payload": {
+      "account_id": "fixture-app",
+      "destination": {
+        "id": "fixture-chat",
+        "type": "chat_id"
+      },
+      "format": "text",
+      "body": "Authorized fixture update; $(do-not-execute)",
+      "idempotency_key": "fixture-bridge-key"
+    },
+    "authorization_ref": "fixture-user-authorization"
+  },
+  "setup": [
+    {
+      "actor": "local",
+      "kind": "server",
+      "args": [
+        "check",
+        "--config",
+        "${LOCAL_CONFIG}"
+      ]
+    },
+    {
+      "actor": "local",
+      "kind": "server",
+      "args": [
+        "identity",
+        "--config",
+        "${LOCAL_CONFIG}"
+      ]
+    },
+    {
+      "actor": "local",
+      "kind": "server",
+      "args": [
+        "capabilities"
+      ]
+    },
+    {
+      "actor": "local",
+      "kind": "bridge",
+      "args": [
+        "hash",
+        "--file",
+        "${LOCAL_SERVER}"
+      ]
+    },
+    {
+      "actor": "local",
+      "kind": "bridge",
+      "args": [
+        "init-local",
+        "--store",
+        "${LOCAL_STORE}",
+        "--binding",
+        "${LOCAL_BINDING}"
+      ]
+    },
+    {
+      "actor": "dot",
+      "kind": "bridge",
+      "args": [
+        "init-cloud",
+        "--store",
+        "${CLOUD_STORE}",
+        "--binding",
+        "${PUBLIC_BINDING}",
+        "--thread-id",
+        "${THREAD_ID}"
+      ]
+    }
+  ],
+  "reuse": [
+    {
+      "actor": "local",
+      "kind": "bridge",
+      "args": [
+        "init-local",
+        "--store",
+        "${LOCAL_STORE}",
+        "--binding",
+        "${LOCAL_BINDING}"
+      ]
+    },
+    {
+      "actor": "dot",
+      "kind": "bridge",
+      "args": [
+        "init-cloud",
+        "--store",
+        "${CLOUD_STORE}",
+        "--binding",
+        "${PUBLIC_BINDING}",
+        "--thread-id",
+        "${THREAD_ID}"
+      ]
+    }
+  ],
+  "cycle": [
+    {
+      "actor": "dot",
+      "kind": "bridge",
+      "args": [
+        "enqueue",
+        "--store",
+        "${CLOUD_STORE}",
+        "--input",
+        "${JOB_INPUT}"
+      ]
+    },
+    {
+      "actor": "dot",
+      "kind": "bridge",
+      "args": [
+        "export",
+        "--store",
+        "${CLOUD_STORE}",
+        "--output",
+        "${DOT_BATCH}",
+        "--limit",
+        "1"
+      ]
+    },
+    {
+      "actor": "dot",
+      "kind": "platform",
+      "tool": "cloud_threads.send_message",
+      "thread": "${THREAD_ID}",
+      "payload": "${DOT_BATCH}",
+      "worker_input": "${LOCAL_BATCH}",
+      "instruction": "Process this exact bounded JSON using the fixed local worker store and local bridge CLI; do not invoke a setup skill."
+    },
+    {
+      "actor": "local",
+      "kind": "bridge",
+      "args": [
+        "process",
+        "--store",
+        "${LOCAL_STORE}",
+        "--input",
+        "${LOCAL_BATCH}",
+        "--output",
+        "${LOCAL_RECEIPTS}"
+      ]
+    },
+    {
+      "actor": "dot",
+      "kind": "platform",
+      "tool": "cloud_threads.read",
+      "thread": "${THREAD_ID}",
+      "worker_output": "${LOCAL_RECEIPTS}",
+      "receipt_input": "${DOT_RECEIPTS}"
+    },
+    {
+      "actor": "dot",
+      "kind": "bridge",
+      "args": [
+        "import",
+        "--store",
+        "${CLOUD_STORE}",
+        "--input",
+        "${DOT_RECEIPTS}"
+      ]
+    },
+    {
+      "actor": "dot",
+      "kind": "bridge",
+      "args": [
+        "show",
+        "--store",
+        "${CLOUD_STORE}",
+        "--id",
+        "send-c84056724a1b795965a284a26baf019fdead7811700d7467"
+      ]
+    }
+  ],
+  "replay": [
+    {
+      "actor": "dot",
+      "kind": "platform",
+      "tool": "cloud_threads.send_message",
+      "thread": "${THREAD_ID}",
+      "payload": "${DOT_BATCH}",
+      "worker_input": "${LOCAL_BATCH}",
+      "instruction": "Process this exact bounded JSON using the fixed local worker store and local bridge CLI; do not invoke a setup skill."
+    },
+    {
+      "actor": "local",
+      "kind": "bridge",
+      "args": [
+        "process",
+        "--store",
+        "${LOCAL_STORE}",
+        "--input",
+        "${LOCAL_BATCH}",
+        "--output",
+        "${LOCAL_RECEIPTS}"
+      ]
+    },
+    {
+      "actor": "dot",
+      "kind": "platform",
+      "tool": "cloud_threads.read",
+      "thread": "${THREAD_ID}",
+      "worker_output": "${LOCAL_RECEIPTS}",
+      "receipt_input": "${DOT_RECEIPTS}"
+    },
+    {
+      "actor": "dot",
+      "kind": "bridge",
+      "args": [
+        "import",
+        "--store",
+        "${CLOUD_STORE}",
+        "--input",
+        "${DOT_RECEIPTS}"
+      ]
+    }
+  ]
+}

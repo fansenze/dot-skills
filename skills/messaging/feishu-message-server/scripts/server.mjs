@@ -5,8 +5,9 @@ import { Writable } from 'node:stream';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, DEFAULT_STATE, SafeError, ConfigError, loadConfig, initialize, checkConfig, prepareConfig } from './config.mjs';
-import { readInbox } from './messages.mjs';
-import { createNetwork, createClient, sendText, getHttpDiagnostics } from './transport.mjs';
+import { readInbox, readInboxPage } from './messages.mjs';
+import { createNetwork, createClient, sendMessage, getHttpDiagnostics } from './transport.mjs';
+import { CAPABILITIES } from './formats.mjs';
 import { startListener } from './runtime.mjs';
 
 export const HELP = `Feishu Message Server — Node.js 22.18+ (transport only)
@@ -17,11 +18,15 @@ Usage: bash feishu.sh <command> [options]
   check                         Check for missing configuration
   start                         Start long connection; Ctrl-C stops it
   inbox [--limit N] [--show-text] Read local messages; text hidden by default
+  inbox-page [--cursor TOKEN] [--limit N] [--show-text] Durable ordered inbox page
+  capabilities                  Declare supported interface and formats; no credentials needed
+  identity                      Report configured app ID and brand only; no network call
   send --receive-id ID --text TEXT [--receive-id-type chat_id]
   reply --message-id ID --text TEXT [--reply-in-thread]
   test | validate | package     Offline tests, skill check, safe portable archive
 Options: --config FILE --brand feishu|lark --state-dir DIR
 Send/reply text: exactly one of --text, --text-file FILE, --stdin
+Optional --format text|markdown|card (card input is JSON); no implicit format fallback.
 Optional --idempotency-key KEY for manual retry of the same operation.
 Authentication and message HTTP requests each time out after 30 seconds; no automatic send retry.
 Retry only when authorized with the same destination, text and key. Changed text needs a new key.
@@ -30,11 +35,12 @@ Receive private messages and group messages that @this bot. No automatic reply o
 `;
 
 const shared = {config: {type: 'string'}, brand: {type: 'string'}, 'state-dir': {type: 'string'}, help: {type: 'boolean'}};
-const outgoing = {text: {type: 'string'}, 'text-file': {type: 'string'}, stdin: {type: 'boolean'}, 'idempotency-key': {type: 'string'}};
+const outgoing = {text: {type: 'string'}, 'text-file': {type: 'string'}, stdin: {type: 'boolean'}, 'idempotency-key': {type: 'string'}, format: {type: 'string'}, 'expected-app-id': {type: 'string'}, 'expected-brand': {type: 'string'}};
 const options = {
   init: {...shared, 'stdin-json': {type: 'boolean'}},
   prepare: {...shared, 'stdin-json': {type: 'boolean'}}, check: shared, start: shared,
   inbox: {...shared, limit: {type: 'string'}, 'show-text': {type: 'boolean'}},
+  'inbox-page': {...shared, cursor: {type: 'string'}, limit: {type: 'string'}, 'show-text': {type: 'boolean'}}, capabilities: {help: {type: 'boolean'}}, identity: shared,
   send: {...shared, ...outgoing, 'receive-id': {type: 'string'}, 'receive-id-type': {type: 'string'}},
   reply: {...shared, ...outgoing, 'message-id': {type: 'string'}, 'reply-in-thread': {type: 'boolean'}}
 };
@@ -74,6 +80,10 @@ export async function main(argv = process.argv.slice(2)) {
   if (v.help) { process.stdout.write(HELP); return 0; }
   const configFile = path.resolve(v.config ?? DEFAULT_CONFIG), stateDir = path.resolve(v['state-dir'] ?? DEFAULT_STATE);
   const print = value => process.stdout.write(JSON.stringify(value) + '\n');
+  if (command === 'capabilities') { print(CAPABILITIES); return 0; }
+  if (command === 'inbox-page') {
+    print(readInboxPage(path.join(stateDir, 'messages.sqlite3'), {cursor: v.cursor ?? null, limit: Number(v.limit ?? 100), showText: Boolean(v['show-text'])})); return 0;
+  }
   if (command === 'check') {
     const result = checkConfig(configFile);
     print(result); return result.ok ? 0 : 1;
@@ -107,6 +117,10 @@ export async function main(argv = process.argv.slice(2)) {
     print({messages: readInbox(path.join(stateDir, 'messages.sqlite3'), limit, Boolean(v['show-text']))}); return 0;
   }
   const config = loadConfig(configFile, v.brand);
+  if (command === 'identity') { print({app_id: config.app_id, brand: config.brand}); return 0; }
+  if ((v['expected-app-id'] && config.app_id !== v['expected-app-id']) || (v['expected-brand'] && config.brand !== v['expected-brand'])) {
+    print({ok: false, status: 'not_sent', idempotency_key: v['idempotency-key'], request_phase: 'validation', error_code: 'binding-mismatch'}); return 1;
+  }
   if (command === 'start') {
     const controller = new AbortController();
     const stop = () => controller.abort();
@@ -129,7 +143,9 @@ export async function main(argv = process.argv.slice(2)) {
   if (command === 'reply' && !v['message-id']) throw new SafeError('message-id is required for reply');
   const network = createNetwork();
   try {
-    const result = await sendText(createClient(config, network), {text, idempotencyKey: v['idempotency-key'],
+    let body = text;
+    if (v.format === 'card') { try { body = JSON.parse(text); } catch { throw new SafeError('Card input must be JSON'); } }
+    const result = await sendMessage(createClient(config, network), {format: v.format ?? 'text', body, idempotencyKey: v['idempotency-key'],
       receiveId: v['receive-id'], receiveIdType: v['receive-id-type'],
       messageId: v['message-id'], replyInThread: Boolean(v['reply-in-thread'])});
     print(result); return result.ok ? 0 : 1;

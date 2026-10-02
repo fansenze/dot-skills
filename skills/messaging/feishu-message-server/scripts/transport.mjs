@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { SafeError } from './config.mjs';
 import { extractMessage } from './messages.mjs';
+import { formatContent } from './formats.mjs';
 
 // The SDK may log credentials, signed socket URLs, raw events or HTTP errors.
 // Lifecycle callbacks below are the only source of transport logs.
@@ -49,8 +50,10 @@ function requestPhase(request) {
   return 'unknown';
 }
 
-export function createNetwork() {
+export function createNetwork({signal} = {}) {
   if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw new SafeError('TLS verification must remain enabled');
+  const cancellation = new AbortController();
+  const requestSignal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
   const agent = new ProxyAgent();
   const envProxy = agent.getProxyForUrl;
   agent.getProxyForUrl = (url, request) => {
@@ -62,7 +65,7 @@ export function createNetwork() {
     return envProxy(parsed.href, request);
   };
   const httpInstance = lark.defaultHttpInstance.create({
-    httpAgent: agent, httpsAgent: agent, proxy: false,
+    httpAgent: agent, httpsAgent: agent, proxy: false, signal: requestSignal,
     timeout: 30000, maxRedirects: 0, maxContentLength: 4 * 1024 * 1024
   });
   const requests = new WeakMap();
@@ -91,6 +94,7 @@ export function createNetwork() {
     throw error;
   });
   return {agent, httpInstance, close() {
+    cancellation.abort();
     agent.destroy(); agent.httpAgent.destroy(); agent.httpsAgent.destroy();
   }};
 }
@@ -101,10 +105,11 @@ export function createClient(config, network) {
     httpInstance: network.httpInstance, logger: silentLogger});
 }
 
-export async function resolveBotIdentity(config, client) {
+export async function resolveBotIdentity(config, client, signal) {
+  if (signal?.aborted) return config;
   if (config.bot_open_id) return config;
   let response;
-  try { response = await client.request({method: 'GET', url: '/open-apis/bot/v3/info'}); }
+  try { response = await client.request({method: 'GET', url: '/open-apis/bot/v3/info', ...(signal ? {signal} : {})}); }
   catch (error) {
     throw rememberHttpDiagnostics(new SafeError('Bot identity lookup failed; check app credentials, bot capability, domain and network'),
       {...transportFailure(error), ...getHttpDiagnostics(error)});
@@ -115,6 +120,7 @@ export async function resolveBotIdentity(config, client) {
       error_type: Number.isSafeInteger(response?.code) && response.code !== 0 ? 'api_error' : 'invalid_response'
     });
   }
+  if (signal?.aborted) return config;
   config.bot_open_id = response.bot.open_id;
   return config;
 }
@@ -136,11 +142,63 @@ export function createDispatcher(config, inbox, log = () => {}, onStorageError =
   });
 }
 
+// Compatibility wrapper for pinned SDK 1.74.0. Keep its discovery/state machine,
+// but validate the response before its early data destructuring and suppress
+// stale discovery results before the SDK can construct a WebSocket.
 export function createSocket(config, network, callbacks) {
-  return new lark.WSClient({appId: config.app_id, appSecret: config.app_secret,
-    domain: config.domain, httpInstance: network.httpInstance, agent: network.agent,
+  let generation = 0, closed = false;
+  const cancellation = new AbortController();
+  const httpInstance = {request: async request => {
+    const signal = request.signal || network.httpInstance.defaults.signal;
+    const response = await network.httpInstance.request({...request,
+      signal: signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal});
+    if (!Number.isSafeInteger(response?.code)) throw new SafeError('Invalid WebSocket discovery response');
+    // Let the SDK retain its exact code-based retry policy; never destructure
+    // an absent data field on a business rejection.
+    if (response.code !== 0) return {...response, data: {}};
+    const data = response.data, options = data?.ClientConfig;
+    let url;
+    try { url = new URL(data?.URL); } catch { /* rejected below */ }
+    if (!url || url.protocol !== 'wss:' || !url.hostname || !options ||
+      !Number.isFinite(options.PingInterval) || options.PingInterval <= 0 ||
+      !Number.isInteger(options.ReconnectCount) || options.ReconnectCount < -1 ||
+      !Number.isFinite(options.ReconnectInterval) || options.ReconnectInterval < 0 ||
+      !Number.isFinite(options.ReconnectNonce) || options.ReconnectNonce < 0) {
+      throw new SafeError('Invalid WebSocket discovery response');
+    }
+    return response;
+  }};
+  const socket = new lark.WSClient({appId: config.app_id, appSecret: config.app_secret,
+    domain: config.domain, httpInstance, agent: network.agent,
     logger: silentLogger, autoReconnect: true, handshakeTimeoutMs: 15000,
     ...callbacks});
+  const pull = socket.pullConnectConfig.bind(socket);
+  socket.pullConnectConfig = async () => {
+    const current = generation;
+    if (closed) return {ok: false, retryable: false};
+    const result = await pull();
+    return closed || current !== generation ? {ok: false, retryable: false} : result;
+  };
+  // The SDK awaits pullConnectConfig before calling connect, so close can land
+  // in that intervening microtask even after the discovery guard passed.
+  const connect = socket.connect.bind(socket);
+  socket.connect = () => closed ? Promise.resolve(false) : connect();
+  const close = socket.close.bind(socket);
+  socket.close = params => {
+    closed = true;
+    generation++;
+    cancellation.abort();
+    return close(params);
+  };
+  // A runtime owns one socket for one listener lifetime. Reuse after close is
+  // deliberately unsupported: construct a new socket for the next listener.
+  const start = socket.start.bind(socket);
+  socket.start = params => {
+    if (closed) throw new SafeError('Closed socket cannot be restarted; create a new listener');
+    generation++;
+    return start(params);
+  };
+  return socket;
 }
 
 export function outgoingContent(text, idempotencyKey = randomUUID()) {
@@ -155,6 +213,18 @@ export function outgoingContent(text, idempotencyKey = randomUUID()) {
 
 export async function sendText(client, {text, idempotencyKey, receiveId, receiveIdType = 'chat_id', messageId, replyInThread = false}) {
   const data = outgoingContent(text, idempotencyKey);
+  return sendData(client, data, {receiveId, receiveIdType, messageId, replyInThread});
+}
+
+export async function sendMessage(client, {format = 'text', body, idempotencyKey = randomUUID(), ...target}) {
+  if (format === 'text') return sendText(client, {...target, text: body, idempotencyKey});
+  const key = outgoingContent('validate key', idempotencyKey).uuid;
+  const data = {...formatContent(format, body), uuid: key};
+  if (Buffer.byteLength(data.content, 'utf8') > 28000) throw new SafeError('Card JSON must not exceed 28000 UTF-8 bytes');
+  return sendData(client, data, target);
+}
+
+async function sendData(client, data, {receiveId, receiveIdType = 'chat_id', messageId, replyInThread = false}) {
   if (messageId !== undefined) {
     if (typeof messageId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(messageId)) throw new SafeError('A valid message-id is required');
   } else {

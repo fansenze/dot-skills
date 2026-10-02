@@ -1,0 +1,7 @@
+{
+  "skill": "remote-config-bridge",
+  "archive_sha256": "5ab1672d2f0a5f17e14b0075d32afd297f9053983c182d64f2310be5f6a5f5c2",
+  "core_sha256": "327bf2e424891e6d6fc2ea30b68c21e59a61871573ac3c198082b19db46ceb9d",
+  "scope": "Imported from the corrected, independently verified code archive. The original core, CLI, adapter and fourteen core tests are preserved. Repository metadata, packaging and orchestration guidance are maintained here.",
+  "acceptance": "Prior dot-to-Mac-to-dot synthetic operation and upgrade replay acceptance passed with one fixture effect. This is not live Feishu delivery evidence."
+}

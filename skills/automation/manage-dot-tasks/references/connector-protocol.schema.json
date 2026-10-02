@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dot-tasks:connector:1",
+  "title": "Manage Dot Tasks connector protocol 1",
+  "$defs": {
+    "format": {
+      "enum": [
+        "text",
+        "markdown",
+        "card"
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "name",
+        "formats",
+        "send",
+        "reply",
+        "receive",
+        "durable_cursor"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "formats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/format"
+          }
+        },
+        "send": {
+          "type": "boolean"
+        },
+        "reply": {
+          "type": "boolean"
+        },
+        "receive": {
+          "type": "boolean"
+        },
+        "durable_cursor": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "document": {
+      "type": "object",
+      "required": [
+        "title",
+        "updated_at",
+        "columns",
+        "rows",
+        "details"
+      ],
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "account_id",
+        "destination",
+        "format",
+        "body",
+        "reply_to",
+        "idempotency_key"
+      ],
+      "properties": {
+        "account_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "destination": {
+          "type": "object",
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            "type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "format": {
+          "$ref": "#/$defs/format"
+        },
+        "body": {
+          "type": [
+            "string",
+            "object"
+          ]
+        },
+        "reply_to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "send_result": {
+      "type": "object",
+      "required": [
+        "status",
+        "idempotency_key"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "api_accepted",
+            "not_sent",
+            "api_error",
+            "delivery_unknown"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "message_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "error_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "request_phase": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "code": {
+          "type": "integer"
+        },
+        "http_status": {
+          "type": "integer"
+        },
+        "elapsed_ms": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "api_accepted"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "message_id"
+            ]
+          }
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "cursor",
+        "event_id",
+        "message_id",
+        "account_id",
+        "tenant_id",
+        "destination_id",
+        "type",
+        "received_at"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "message_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "account_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "destination_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "sender_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sender_tenant_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        },
+        "received_at": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "page": {
+      "type": "object",
+      "required": [
+        "events",
+        "next_cursor",
+        "has_more"
+      ],
+      "properties": {
+        "events": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/event"
+          }
+        },
+        "next_cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "has_more": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "remote-config-bridge-skill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node scripts/validate.mjs",
+    "package": "node scripts/package.mjs",
+    "cli": "node scripts/bridge.mjs"
+  },
+  "description": "Node-only remote operation bridge; credentials remain on the selected computer"
+}
