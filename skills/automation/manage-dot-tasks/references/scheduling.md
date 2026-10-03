@@ -45,13 +45,37 @@ a request is one authorized action; an event is one durable delivery trigger.
 Keep task text in its original language. Queue specifications contain references,
 action types and revisions, not executable instructions or copied conversations.
 Use opaque references and short, sanitized evidence. Never copy credentials,
-private message bodies, environment dumps, or raw error logs into this store.
+private message bodies, environment dumps, or raw error logs into task records,
+scheduling specifications or notifications. Agent-mode integration stores bounded
+authorized raw text separately in its private intake envelope for agent review.
 Text length bounds and rejected unknown flags are not a secret scanner.
+
+## Conversational intake before scheduling
+
+With an explicitly configured agent-mode message grant, `start` returns durable
+claimed `messages` in addition to scheduler `batch` items. Dot interprets natural
+language; the CLI never guesses intent or calls platform tools. Follow the
+[message decision protocol](connectors.md#agent-decisions-and-recovery): record a
+sanitized decision, create or link the task atomically, then use `schedule` for an
+authorized action before `message-ack`. Use the claim's exact `source` (`connector-` plus connector ID) and
+`source_ref` (its scoped message `id`), with stable event/request IDs; replay must
+reuse them. Do not use the raw provider message ID as the source reference. A
+recorded decision recovered in ack mode needs that same scheduling check, not a
+new task or action. A query, clarification, or rejection needs no execution
+request. The scheduler's `begin`, execution reconciliation, `record`, `ack`, and
+acceptance checks remain unchanged. Inbound intake acknowledgement and scheduler
+acknowledgement are distinct.
 
 ## One durable scheduling request
 
-Read the task and stage its task/step status before scheduling. A schedule is
-bound to `work_revision`; later material changes require reviewing a new request.
+Read the task and stage its task/step status before scheduling. Before actual
+execution, explicitly use `update TASK_ID --status executing --reason ...` and
+record the next action, then schedule using the resulting current revision.
+`begin`, `record`, and `ack` do not transition task progress. After the actual
+work is ready, enter `awaiting_verification`, perform the requested acceptance
+checks, record `check --outcome pass` with real evidence, and call `complete`
+only after all completion requirements hold. A schedule is bound to
+`work_revision`; later material changes require reviewing a new request.
 Summary-only updates and execution observations do not invalidate that revision.
 
 ```bash

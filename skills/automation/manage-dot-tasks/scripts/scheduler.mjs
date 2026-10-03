@@ -144,14 +144,14 @@ export function create_scheduler(core) {
     if (!old) data.bindings.push({ ...ref, task_id: taskId });
     return Boolean(old);
   }
-  function register(args, taskFactory) {
+  function register(args, taskFactory, extraWrites = {}) {
     const data = read(), ref = identity(args), old = binding(data, ref);
     if (old) {
       if (args.id && args.id !== old.task_id) fail('source identity already belongs to another task');
       return store.get(old.task_id);
     }
     const task = taskFactory(); link(data, task.id, ref); validate(data);
-    store.save(task, true, writes(data)); return task;
+    store.save(task, true, {...writes(data), ...extraWrites}); return task;
   }
   function eligible(r) {
     const task = store.get(r.spec.task_id);
@@ -232,7 +232,7 @@ export function create_scheduler(core) {
     if (cmd === 'lookup') return binding(data, identity(args)) || null;
     if (cmd === 'bind') {
       store.get(args.id); const ref = identity(args), duplicate = link(data, args.id, ref);
-      if (!duplicate) save(data); return { ...ref, task_id: args.id, duplicate };
+      if (!duplicate || Object.keys(extraWrites).length) save(data, extraWrites); return { ...ref, task_id: args.id, duplicate };
     }
     if (cmd === 'coverage') {
       if (!args.source && !args.scope && !args.state && !args.evidence && !args.observed_at) return data.coverage;

@@ -230,7 +230,7 @@ export function default_store({ env = process.env, platform = process.platform, 
 }
 export function parse_args(argv=process.argv.slice(2)) {
   const args={store:default_store(),lock_timeout:10};let i=0;
-  function option(allowed){const raw=argv[i++],eq=raw.indexOf('='),key=raw.slice(2,eq<0?undefined:eq);if(!allowed.includes(key))throw new TaskError(`unrecognized argument: ${raw}`);let value;if(['all','initial'].includes(key)){if(eq>=0)throw new TaskError('--all does not take a value');value=true;}else{value=eq>=0?raw.slice(eq+1):argv[i++];if(value===undefined||value.startsWith('--'))throw new TaskError(`--${key} requires a value`);}args[key.replaceAll('-','_')]=value;}
+  function option(allowed){const raw=argv[i++],eq=raw.indexOf('='),key=raw.slice(2,eq<0?undefined:eq);if(!allowed.includes(key))throw new TaskError(`unrecognized argument: ${raw}`);let value;if(['all','initial','allow-new','updates'].includes(key)){if(eq>=0)throw new TaskError('--all does not take a value');value=true;}else{value=eq>=0?raw.slice(eq+1):argv[i++];if(value===undefined||value.startsWith('--'))throw new TaskError(`--${key} requires a value`);}args[key.replaceAll('-','_')]=value;}
   while(i<argv.length&&argv[i].startsWith('-')){if(['--help','-h'].includes(argv[i]))return {...args,help:help()};option(['store','lock-timeout']);}
   args.command=argv[i++];if(!has(COMMAND_OPTIONS,args.command))throw new TaskError('a valid command is required; use --help');
   const positional=[];while(i<argv.length){if(['--help','-h'].includes(argv[i]))return {...args,help:help(args.command)};if(argv[i].startsWith('--'))option(COMMAND_OPTIONS[args.command]);else positional.push(argv[i++]);}
@@ -268,12 +268,14 @@ function recognized_lock_candidate(store, name) {
     return false;
   }
 }
+export function make_task(args) {const stamp=now();return {schema_version:VERSION,id:args.id?task_id(args.id):'task-'+uid(16),title:nonempty(args.title,'title'),goal:nonempty(args.goal,'goal'),status:args.status,created_at:stamp,updated_at:stamp,revision:1,work_revision:1,last_checked_at:null,blocker:args.blocker.trim(),next_action:args.next_action.trim(),summary:args.summary.trim(),steps:[],events:[event_record('registered','Task registered',args.source,stamp)],checks:[],results:[],execution:{state:'unknown',observed_at:null,source:'',run_id:''},completion:null};}
+
 export async function run(args) {
   if(!Number.isFinite(args.lock_timeout)||args.lock_timeout<=0)throw new TaskError('lock timeout must be positive and finite');
   const store=new Store(args.store,args.lock_timeout),cmd=args.command;
   if(cmd==='start')await run({...args,command:'init',stale_hours:24,snapshot_note:''});
   const scheduler=create_scheduler({store,TaskError,encoded,read_json,nonempty,task_id,timestamp,timestamp_us,observed_time,newer_execution,now,event_record,display_time});
-  const integration=createIntegration({store,scheduler});
+  const integration=createIntegration({store,scheduler,makeTask:make_task});
   if(has(INTEGRATION_OPTIONS,cmd))return integration.run(args);
   if(['wait','next-batch'].includes(cmd))return scheduler.wait(args);
   return store.locked(async()=>{
@@ -287,7 +289,7 @@ export async function run(args) {
     const config=store.config();
     if(has(SCHEDULER_OPTIONS,cmd))return scheduler.execute(args);
     if(cmd==='register'){
-      const make=()=>{const stamp=now();return {schema_version:VERSION,id:args.id?task_id(args.id):'task-'+uid(16),title:nonempty(args.title,'title'),goal:nonempty(args.goal,'goal'),status:args.status,created_at:stamp,updated_at:stamp,revision:1,work_revision:1,last_checked_at:null,blocker:args.blocker.trim(),next_action:args.next_action.trim(),summary:args.summary.trim(),steps:[],events:[event_record('registered','Task registered',args.source,stamp)],checks:[],results:[],execution:{state:'unknown',observed_at:null,source:'',run_id:''},completion:null};};
+      const make=()=>make_task(args);
       if(args.source_ref!==undefined)return scheduler.register(args,make);
       const t=make();store.save(t,true);return t;
     }

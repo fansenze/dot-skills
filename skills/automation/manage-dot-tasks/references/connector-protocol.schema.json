@@ -299,6 +299,27 @@
             "string",
             "null"
           ]
+        },
+        "parent_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Optional exact provider envelope context; not identity or authorization evidence."
+        },
+        "root_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Optional exact provider envelope context; not identity or authorization evidence."
+        },
+        "thread_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Optional exact provider envelope context; not identity or authorization evidence."
         }
       },
       "additionalProperties": false

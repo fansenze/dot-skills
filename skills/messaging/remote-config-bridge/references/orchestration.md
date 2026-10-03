@@ -74,7 +74,7 @@ node "$DOT_BRIDGE/scripts/bridge.mjs" init-cloud --store "$CLOUD_BRIDGE_STORE" -
 node "$TASK_SKILL/scripts/taskctl.mjs" --store "$TASK_STORE" connect --id remote-feishu --module "$DOT_BRIDGE/scripts/adapter.mjs" --settings-file "$BRIDGE_SETTINGS_JSON"
 ```
 
-Settings contain exactly `{"store":"/absolute/dot/bridge-store","authorization_ref":"actual-user-authorization-reference"}`. They contain no remote configuration path. Do not register `manage-dot-tasks/scripts/connectors/feishu.mjs` with a Mac configuration path on dot; that direct adapter spawns a CLI in its own environment. Continue with the task skill's real `watch`/`allow-inbound` commands for only the authorized destinations and task scope. Binding creation alone neither sends nor grants inbox command authority.
+Settings contain exactly `{"store":"/absolute/dot/bridge-store","authorization_ref":"actual-user-authorization-reference"}`. They contain no remote configuration path. Do not register `manage-dot-tasks/scripts/connectors/feishu.mjs` with a Mac configuration path on dot; that direct adapter spawns a CLI in its own environment. Continue with the task skill's real `watch`/`allow-inbound` commands for only the authorized destinations and task scope. Binding creation alone neither sends nor grants inbox authority. For ordinary conversational intake, explicitly register agent mode and its query/create/continue, existing-task, new-task and update scopes in Manage Dot Tasks. Legacy command mode remains compatible. Bounded receive jobs carry text as untrusted data; active dot performs interpretation after durable intake, never the bridge or local transport worker.
 
 ## Exact batch and receipt flow
 

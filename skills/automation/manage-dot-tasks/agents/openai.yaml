@@ -1,7 +1,7 @@
 interface:
   display_name: "Task Management"
-  short_description: "Tasks, scheduling, notifications, and verified outcomes"
-  default_prompt: "Use $manage-dot-tasks to manage my tasks and authorized scheduling with authorized message-server connections through its unified CLI and Markdown views, and remember the authorized usage rules with existing platform memory."
+  short_description: "Conversational intake, scheduling, and verified outcomes"
+  default_prompt: "Use $manage-dot-tasks to manage my tasks from authorized natural-language messages and schedule authorized work through verified message-server connections through its unified CLI and Markdown views, and remember the authorized usage rules with existing platform memory."
   icon_small: "assets/icon.svg"
   icon_large: "assets/icon.svg"
 policy:

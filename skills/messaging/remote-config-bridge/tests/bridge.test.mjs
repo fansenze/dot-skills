@@ -35,3 +35,30 @@ test('stale reaper preserves a replacement generation and retries acquisition',a
  try {assert.equal(await cloud.lock(()=>42),42);assert.equal(injected,true);assert.equal(replacementObserved,true);}
  finally {fs.unlinkSync=unlink;}
 });
+
+test('bridge adapter preserves optional provider context through durable receipts without granting identity', async t => {
+ const {cloud, worker} = await fixture(t);
+ const {createConnector} = await import('../scripts/adapter.mjs');
+ const adapter = createConnector({store:cloud.root, authorization_ref:'fixture'});
+ const controller = new AbortController(); t.after(() => controller.abort());
+ const pending = adapter.receive({signal:controller.signal});
+ const base = {event_id:'event-fixture', message_id:'message-fixture', app_id:'fixture-app', tenant_key:'fixture-tenant',
+   sender_tenant_key:'fixture-tenant', sender_open_id:'fixture-sender', chat_id:'fixture-chat', message_type:'text',
+   received_at:1700000000, bot_mention_keys:['@_bot'], text:'@_bot Do this\n  then this'};
+ const context = {parent_id:'om_parent', root_id:'om_root', thread_id:'omt_thread'};
+ const invalid = [null, '', ' ', 'bad\nID', 'x'.repeat(257), {}, ['om_array'], 42];
+ const messages = [base, {...base,...context}, ...invalid.map(v => ({...base,parent_id:v,root_id:v,thread_id:v}))]
+   .map((message,i) => ({cursor:'cursor-'+i,message}));
+ let batch; for(let i=0;i<100;i++){batch=await exportBatch(cloud);if(batch.jobs.length)break;await new Promise(r=>setTimeout(r,10));}
+ assert.equal(batch.jobs.length,1);
+ const receipts = await processBatch(worker,batch,async()=>({protocol_version:1,messages,next_cursor:'cursor-end',has_more:false}));
+ await importReceipts(cloud,receipts);
+ const result = await pending;
+ assert.equal(result.next_cursor,'cursor-end');
+ for(const [i,event] of result.events.entries()){
+   assert.equal(event.text,'Do this\n  then this'); assert.equal(event.sender_id,'fixture-sender');
+   for(const [key,value] of Object.entries(context)) {
+     if(i===1)assert.equal(event[key],value);else assert.equal(Object.hasOwn(event,key),false);
+   }
+ }
+});

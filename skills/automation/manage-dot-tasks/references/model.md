@@ -7,7 +7,7 @@ task-store/
   store.json                    # Schema, creation time, freshness threshold, note
   tasks.json                    # Lightweight id/title/status/updated_at index
   scheduler.json                # Optional durable events, requests, bindings and coverage
-  integration.json              # Optional connector policies, outbox, inbox dedup and checkpoints
+  integration.json              # Optional connector policies, outbox, private intake, dedup and checkpoints
   tasks/
     task-.../
       task.json                 # Authoritative task record
@@ -93,4 +93,4 @@ Optional `summary` provides concise progress; older records may omit it. Summary
 
 ## Notification and inbox transactions
 
-The optional schema-1 integration records and their transitions are defined in [connectors.md](connectors.md). A meaningful task mutation and its destination-scoped notification snapshots share one recovery journal. A consumed inbound command, dedup record, cursor and resulting scheduler request or reply likewise share a journal. Delivery acknowledgements never change task status or create another task event. Adapter bindings and queued routes are immutable; unknown delivery requires reconciliation. Rendered pending/failed/unknown delivery summaries join the existing UI without rewriting task records. Old stores need no migration until integration is configured.
+The optional schema-1 integration records and their transitions are defined in [connectors.md](connectors.md). A meaningful task mutation and its destination-scoped notification snapshots share one recovery journal. A consumed legacy command, dedup record, cursor and resulting scheduler request or reply likewise share a journal. Agent-mode ingestion instead atomically persists the bounded private text envelope and dedup/checkpoint; a later fenced agent decision atomically creates or links a task, stores its sanitized decision, and queues its authorized response. Scheduling actual work is a separate idempotent step performed by dot before intake acknowledgement. Delivery acknowledgements never change task status or create another task event. Adapter bindings and queued routes are immutable; unknown delivery requires reconciliation. Rendered pending/failed/unknown delivery summaries join the existing UI without rewriting task records. Old stores need no migration until integration is configured.

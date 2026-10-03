@@ -8,21 +8,27 @@ Reusable skills for messaging, task management and scheduling, and moving local 
 | --- | --- | --- |
 | Messaging | [Feishu Message Server](skills/messaging/feishu-message-server/SKILL.md) | Receive private messages and group mentions; send or reply with explicit text, Markdown, or cards. |
 | Messaging | [Remote Config Bridge](skills/messaging/remote-config-bridge/SKILL.md) | Keep configuration/credentials on the selected computer; bridge authorized operations and receipts through a reused local task. |
-| Automation | [Manage Dot Tasks](skills/automation/manage-dot-tasks/SKILL.md) | Manage tasks, scheduling, authorized notifications/inbound commands, and acceptance through one CLI and Markdown UI. |
+| Automation | [Manage Dot Tasks](skills/automation/manage-dot-tasks/SKILL.md) | Manage tasks, scheduling, authorized notifications/natural-language intake, and acceptance through one CLI and Markdown UI. |
 | Files | [Transfer Local Files to dot](skills/files/transfer-local-files-to-dot/SKILL.md) | Copy selected local files through ChatGPT Library and verify exact bytes on dot. |
 
 ## Workflow: install and start task management
 
-Ask dot to install and start Manage Dot Tasks. The agent selects the configuration’s actual environment. For a user-computer configuration orchestrated by dot, Remote Config Bridge keeps configuration and Feishu transport there and transports only authorized batches/results through a reused local task. Same-environment configurations use the direct connector. Both routes reuse verified recipients. You do not write integration code. Configuration, task execution, notifications and inbound command authorization remain explicit scopes.
+Ask dot to install and start Manage Dot Tasks. The agent selects the configuration’s actual environment. For a user-computer configuration orchestrated by dot, Remote Config Bridge keeps configuration and Feishu transport there and transports only authorized batches/results through a reused local task. Same-environment configurations use the direct connector. Both routes reuse verified recipients. You do not write integration code. Configuration, task execution, notifications and inbound message authorization remain explicit scopes. Ordinary Feishu conversation is the primary intake experience; dot interprets requests using the scoped conversation and task context. Scripts only validate, persist, and transport data.
 
 ```text
 Install and start manage-dot-tasks from this repository.
 Reuse my existing verified Feishu configuration on its original computer and
 my private-chat mapping. If dot runs elsewhere, use remote-config-bridge and
 keep credentials there; reuse one verified local task.
-Send an initial task overview, then meaningful progress, blockers, failures,
-and verified completion as native cards. Allow my verified sender/account/
-tenant/chat to use /tasks list, show, run and verify for the agreed tasks.
+Start or reuse the matching receiver. Accept ordinary messages from my verified
+sender/account/tenant/private chat as requests to query, create, or continue
+tasks. Allow new task creation, and access only the existing tasks we agree on.
+Ask me for missing scope or ambiguous references; do not infer extra authority.
+Send an initial overview of those tasks, then meaningful progress, blockers,
+failures, results, and verified completion as native cards. Also send progress
+and results for new tasks created from my authorized messages in that chat.
+Interpret messages yourself using scoped task and recent conversation context;
+record your decision durably, and execute authorized work with your real tools.
 Discover and bind conversation commitments, delegated work and local tasks
 through your available tools. Report partial or unavailable discovery.
 Continue the active start/process/record/ack loop until I ask you to stop,
@@ -30,6 +36,8 @@ reading yielded tool sessions and rearming after bounded idle timeouts.
 ```
 
 If configuration, account, sender, destination or scope is missing, dot requests only that information and continues local task setup. Configuration routing is not a credential transfer. Remote Config Bridge has no arbitrary file read/export function and does not replace upload/download tools; distributing reviewed code may still require supported file transfer. Separate authorized ordinary-file transfers follow the transfer skill’s contract. Never describe a credential-bearing configuration as secret-free to bypass a restriction. No generic setup action silently starts a service or sends a message. The active loop depends on dot’s running tool calls, permissions and environment; it cannot wake an inactive dot.
+
+Use an explicit agent-mode grant for this workflow. A missing existing-task scope is a question for the user, not an implicit all-tasks grant; `--tasks none --allow-new` supports new-task-only intake. The legacy `/tasks` command mode remains available and remains the CLI default for compatibility. Neither mode bypasses action-specific approval.
 
 See the [task/server connector contract](skills/automation/manage-dot-tasks/references/connectors.md) for setup, recovery and extension details. Feishu cards use native columns; Markdown/text fallbacks require an explicit supported format choice.
 

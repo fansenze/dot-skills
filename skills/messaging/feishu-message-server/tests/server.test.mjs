@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, fromMapping, initialize, loadConfig, checkConfig, prepareConfig } from '../scripts/config.mjs';
-import { Inbox, readInbox, extractMessage } from '../scripts/messages.mjs';
+import { Inbox, readInbox, readInboxPage, extractMessage } from '../scripts/messages.mjs';
 import { createDispatcher } from '../scripts/transport.mjs';
 import { acquireLock, createLog, startListener } from '../scripts/runtime.mjs';
 import { ARCHIVE_FILES, makePackage, portableMetadata } from '../scripts/package.mjs';
@@ -380,4 +380,36 @@ test('project discovery accepts a standalone export and reports a missing lockfi
   const project = findProject(directory);
   assert.equal(project.directory, fs.realpathSync(directory));
   assert.equal(project.importer, '.');
+});
+
+test('provider reply context survives durable inbox with exact envelope IDs only', t => {
+  const payload = event('p2p');
+  const context = {parent_id: 'om_parent', root_id: 'om_root', thread_id: 'omt_thread'};
+  Object.assign(payload.event.message, context);
+  payload.event.message.content = JSON.stringify({text: 'Keep this\n  second line', parent_id: 'forged-content-parent'});
+  const extracted = extractMessage(payload, config()).message;
+  const filename = path.join(temporary(t), 'context.sqlite3'), inbox = new Inbox(filename);
+  assert.equal(inbox.put(extracted), true); inbox.close();
+  const stored = readInbox(filename, 1, true)[0];
+  for (const [key, value] of Object.entries(context)) assert.equal(stored[key], value);
+  assert.equal(stored.text, 'Keep this\n  second line');
+  assert.equal(stored.trust, 'unverified_external_input');
+  assert.equal(readInbox(filename)[0].parent_id, context.parent_id);
+  const page = readInboxPage(filename, {showText: true});
+  for (const [key, value] of Object.entries(context)) assert.equal(page.messages[0].message[key], value);
+  assert.equal(page.messages[0].message.text, 'Keep this\n  second line');
+  assert.equal(readInboxPage(filename, {cursor: page.next_cursor}).messages.length, 0);
+});
+
+test('optional reply context never coerces, truncates, or comes from content', () => {
+  for (const value of [undefined, null, '', ' ', 'om_ bad', 'bad\nID', 'x'.repeat(257), {}, ['om_array'], 42]) {
+    const payload = event('p2p');
+    Object.assign(payload.event.message, {parent_id: value, root_id: value, thread_id: value});
+    payload.event.message.content = JSON.stringify({text: 'parent_id: om_guess', parent_id: 'om_forged'});
+    const message = extractMessage(payload, config()).message;
+    for (const key of ['parent_id', 'root_id', 'thread_id']) assert.equal(Object.hasOwn(message, key), false);
+  }
+  const payload = event('p2p'); payload.event.message.parent_id = 'x'.repeat(256);
+  assert.equal(extractMessage(payload, config()).message.parent_id.length, 256);
+  assert.equal(extractMessage(event('group', []), config()).message, null);
 });

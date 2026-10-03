@@ -4,6 +4,12 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ConnectorError, renderText, requireText } from './contract.mjs';
 
+// Provider envelope IDs are context hints, never sender identity or authorization.
+// Omit malformed optional metadata instead of truncating or inventing identifiers.
+const replyContext = message => Object.fromEntries(['parent_id', 'root_id', 'thread_id']
+  .filter(key => typeof message[key] === 'string' && /^[^\s\x00-\x1f\x7f]{1,256}$/u.test(message[key]))
+  .map(key => [key, message[key]]));
+
 export function createConnector(settings) {
   const fields = ['server', 'config_ref', 'state_dir', 'account_id', 'brand'];
   if (!settings || Object.keys(settings).some(k => !fields.includes(k))) throw new ConnectorError('Feishu settings accept only server/config_ref/state_dir paths, account_id and brand');
@@ -57,7 +63,7 @@ export function createConnector(settings) {
       return {next_cursor: page.next_cursor, has_more: page.has_more, events: page.messages.map(({cursor, message: m}) => {
         let text = m.text;
         for (const key of m.bot_mention_keys ?? []) if (typeof text === 'string') text = text.replace(key, '').trim();
-        return {cursor, event_id: m.event_id, message_id: m.message_id, account_id: m.app_id, tenant_id: m.tenant_key,
+        return {cursor, ...replyContext(m), event_id: m.event_id, message_id: m.message_id, account_id: m.app_id, tenant_id: m.tenant_key,
           sender_tenant_id: m.sender_tenant_key, sender_id: m.sender_open_id, destination_id: m.chat_id,
           type: m.message_type, received_at: new Date(m.received_at * 1000).toISOString(),
           occurred_at: /^\d{13}$/.test(m.message_created_ms) ? new Date(Number(m.message_created_ms)).toISOString() : null, text};

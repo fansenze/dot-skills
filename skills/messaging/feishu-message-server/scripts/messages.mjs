@@ -95,6 +95,12 @@ export function readInbox(filename, limit = 20, showText = false) {
 
 const nonempty = s => typeof s === 'string' && s.length > 0;
 
+// Provider envelope IDs are context hints, never sender identity or authorization.
+// Omit malformed optional metadata instead of truncating or inventing identifiers.
+const replyContext = message => Object.fromEntries(['parent_id', 'root_id', 'thread_id']
+  .filter(key => typeof message[key] === 'string' && /^[^\s\x00-\x1f\x7f]{1,256}$/u.test(message[key]))
+  .map(key => [key, message[key]]));
+
 export function extractMessage(payload, config) {
   payload = object(payload);
   const header = object(payload.header), event = object(payload.event);
@@ -119,7 +125,7 @@ export function extractMessage(payload, config) {
     sender_open_id: senderId.open_id ?? null, sender_tenant_key: sender.tenant_key ?? null,
     bot_mention_keys: (Array.isArray(message.mentions) ? message.mentions : []).filter(m => config.bot_open_id && object(object(m).id).open_id === config.bot_open_id)
       .map(m => m.key).filter(k => typeof k === 'string' && k.startsWith('@')),
-    content, ...(text === undefined ? {} : {text}),
+    ...replyContext(message), content, ...(text === undefined ? {} : {text}),
     message_created_ms: String(message.create_time ?? ''), received_at: Date.now() / 1000,
     status: 'received', trust: 'unverified_external_input'
   }};

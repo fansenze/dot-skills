@@ -91,7 +91,7 @@ Sending never retries automatically. For an authorized retry of the same operati
 
 `capabilities` declares protocol 1 and supported formats without reading credentials. `identity --config FILE` reports only app ID and platform. `inbox-page` supplies a durable ordered cursor; `inbox --limit N` is only a recent view and must not drive reliable ingestion. See the independent [server interface](references/interface.md) for schemas, acknowledgement boundaries, migration, and examples.
 
-Manage Dot Tasks owns authorization, task interpretation, scheduling and its transactional outbox. This server only receives/stores/transmits. For same-environment transport the agent uses the task skill’s bundled Feishu adapter. For a user-computer configuration orchestrated by dot, it uses `remote-config-bridge/scripts/adapter.mjs` on dot and the fixed Feishu CLI on the selected computer. The user writes no glue code. A message in this server’s inbox alone never authorizes a task or reply.
+Manage Dot Tasks owns authorization, task interpretation, scheduling and its transactional outbox. This server only receives/stores/transmits. For same-environment transport the agent uses the task skill’s bundled Feishu adapter. For a user-computer configuration orchestrated by dot, it uses `remote-config-bridge/scripts/adapter.mjs` on dot and the fixed Feishu CLI on the selected computer. The user writes no glue code. A message in this server’s inbox alone never authorizes a task or reply. Manage Dot Tasks can explicitly grant natural-language intake to a verified sender/account/tenant/chat; active dot then interprets scoped messages and records decisions. This server performs no natural-language routing, task creation, or platform calls.
 
 ### Diagnose a send timeout
 

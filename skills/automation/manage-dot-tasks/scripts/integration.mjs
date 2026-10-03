@@ -1,4 +1,5 @@
-/** Transactional notifications and explicitly authorized inbound task commands. */
+/** Transactional notifications and explicitly authorized agent/command intake. */
+import {createMessageInbox, agentMessage, grantCovers, messageText, messageEnvelope, validateMessages} from './message-inbox.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,13 +8,14 @@ import { digest, loadConnector, sendResult, bounded, requireText, ConnectorError
 export const INTEGRATION_OPTIONS = {
   connect: ['id', 'module', 'settings-file'], connections: [], disconnect: [],
   watch: ['id', 'connector', 'account', 'destination', 'destination-type', 'format', 'events', 'tasks', 'language', 'initial'],
-  unwatch: [], 'allow-inbound': ['id', 'connector', 'account', 'tenant', 'sender', 'destination', 'commands', 'tasks', 'since', 'format', 'reply-mode'],
+  unwatch: [], 'allow-inbound': ['id', 'connector', 'account', 'tenant', 'sender', 'destination', 'commands', 'tasks', 'since', 'format', 'reply-mode', 'mode', 'allow-new', 'updates'],
+  'message-next': ['consumer', 'limit', 'lease-ms'], 'message-renew': ['token', 'lease-ms'], 'message-record': ['token', 'decision-file'], 'message-ack': ['token'],
   'deny-inbound': [], outbox: ['all'], inbound: [],
   ingest: ['connector', 'limit'], deliver: ['consumer', 'limit', 'lease-ms'],
   'retry-notice': ['reason'], 'resolve-notice': ['status', 'message-id', 'evidence'],
   start: ['consumer', 'timeout-ms', 'lease-ms', 'limit'],
 };
-export const INTEGRATION_IDS = ['disconnect', 'unwatch', 'deny-inbound', 'retry-notice', 'resolve-notice'];
+export const INTEGRATION_IDS = ['disconnect', 'unwatch', 'deny-inbound', 'retry-notice', 'resolve-notice', 'message-renew', 'message-record', 'message-ack'];
 const EVENTS = ['registered', 'progress', 'blocked', 'failed', 'completed', 'verification', 'result', 'execution'];
 const FINAL = new Set(['api_accepted', 'api_error', 'delivery_unknown', 'dead', 'cancelled']);
 const STATES = ['pending', 'claimed', 'sending', 'recorded', ...FINAL];
@@ -26,7 +28,7 @@ const csv = (value, choices) => {
   if (choices && list.some(v => !choices.includes(v))) throw new ConnectorError('Unsupported scope value');
   return list;
 };
-const taskScope = value => value === 'all' ? ['*'] : csv(value).map(id);
+const taskScope = value => value === 'none' ? [] : value === 'all' ? ['*'] : csv(value).map(id);
 const covers = (scope, taskId) => scope.includes('*') || scope.includes(taskId);
 const count = (value, fallback, max) => { const n = value === undefined ? fallback : Number(value); if (!Number.isSafeInteger(n) || n < 1 || n > max) throw new ConnectorError('Invalid bounded count'); return n; };
 const projection = task => {
@@ -71,6 +73,7 @@ export function readIntegration(store) {
     if (!p || p.connector !== c.id || digest(n.route) !== digest(routeFor(c, p)) || n.id !== 'notice-' + digest([n.event_id, n.route]).slice(0, 40)) throw new ConnectorError('Notification route integrity failed');
     if (n.attempts < 0 || !Number.isFinite(Date.parse(n.available_at)) || (n.lease && !Number.isFinite(Date.parse(n.lease.until)))) throw new ConnectorError('Invalid notification recovery state');
   }
+  validateMessages(data);
   return data;
 }
 export function decorateNotifications(store, tasks, language = 'en') {
@@ -101,8 +104,8 @@ const routeFor = (connection, policy) => ({connector_id: connection.id, binding:
 
 // Store.save merges these writes with the task, projections, index and scheduler.
 // No connector is loaded, no message is sent, and no source is polled in this hook.
-export function taskNotificationWrites(store, task, previous) {
-  const data = readIntegration(store), current = projection(task), prior = previous && projection(previous);
+export function taskNotificationWrites(store, task, previous, suppliedData = null) {
+  const data = suppliedData ?? readIntegration(store), current = projection(task), prior = previous && projection(previous);
   if (prior && digest(prior) === digest(current)) return {};
   const kinds = [previous ? 'progress' : 'registered'];
   if (['blocked', 'failed', 'completed'].includes(task.status) && previous?.status !== task.status) kinds.push(task.status);
@@ -116,18 +119,28 @@ export function taskNotificationWrites(store, task, previous) {
     enqueue(data, `task:${task.id}:${task.revision}`, routeFor(connection, watch), document([task], watch.language), task.id);
     changed = true;
   }
+  // Progress follows an explicit updates grant and an agent-recorded association.
+  // One latest associated incoming message per immutable grant is the reply anchor.
+  if (previous) for (const grant of data.grants.filter(g => g.mode === 'agent' && g.enabled && g.updates)) {
+    const connection = data.connections.find(c => c.id === grant.connector && c.enabled);
+    const anchor = data.inbox.filter(r => agentMessage(r) && r.grant_id === grant.id && r.task_id === task.id && r.decision && ['create','continue'].includes(r.decision.decision)).at(-1);
+    if (!connection || !anchor || !grantCovers(data,grant,task.id)) continue;
+    enqueue(data, 'task:'+task.id+':'+task.revision, routeFor(connection,grant), document([task]), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null);
+    changed = true;
+  }
   return changed ? writes(data) : {};
 }
 
-export function createIntegration({store, scheduler}) {
+export function createIntegration({store, scheduler, makeTask}) {
   const locked = fn => store.locked(() => { store.config(); return fn(); });
   const save = data => store.commit(writes(data));
+  const messages = createMessageInbox({store,scheduler,makeTask,read:readIntegration,save,writes,routeFor,enqueue,document,taskNotices:taskNotificationWrites});
   const publicNotice = n => ({id: n.id, event_id: n.event_id, task_id: n.task_id, route: n.route, state: n.state,
     attempts: n.attempts, available_at: n.available_at, receipt: n.receipt});
   function policyActive(data, notice) {
     const c = data.connections.find(c => c.id === notice.route.connector_id);
     const p = [...data.watches, ...data.grants].find(p => p.id === notice.route.policy_id && p.connector === c?.id);
-    return c?.enabled && c.binding === notice.route.binding && p?.enabled && (!notice.task_id || covers(p.tasks, notice.task_id));
+    return c?.enabled && c.binding === notice.route.binding && p?.enabled && (!notice.task_id || grantCovers(data,p,notice.task_id));
   }
   function getLease(data, noticeId, token) {
     const n = data.outbox.find(n => n.id === noticeId);
@@ -257,13 +270,17 @@ export function createIntegration({store, scheduler}) {
         const command = parseCommand(e), received = Date.parse(e.received_at), occurred = e.occurred_at === undefined ? received : Date.parse(e.occurred_at);
         const grant = data.grants.find(g => g.enabled && g.connector === snapshot.c.id && g.account === e.account_id && g.tenant === e.tenant_id &&
           g.tenant === e.sender_tenant_id && g.sender === e.sender_id && g.destination === e.destination_id && Number.isFinite(received) && Number.isFinite(occurred) && Math.min(received, occurred) >= Date.parse(g.since) &&
-          command && g.commands.includes(command.verb) && (!command.task_id || covers(g.tasks, command.task_id)));
+          ((g.mode === 'agent' && messageText(e)) || (g.mode !== 'agent' && command && g.commands.includes(command.verb) && (!command.task_id || covers(g.tasks, command.task_id)))));
         if (cp) cp.cursor = e.cursor; else data.checkpoints.push({id: snapshot.c.id, cursor: e.cursor});
         if (seen) { save(data); return; }
         const entry = {id: messageKey, event_key: eventKey, connector: snapshot.c.id, status: 'rejected', reason: 'not-authorized-or-not-a-command'};
         data.inbox.push(entry);
         const currentConnection = data.connections.find(c => c.id === snapshot.c.id);
         if (!grant || !currentConnection.enabled || currentConnection.binding !== snapshot.c.binding) { save(data); return; }
+        if (grant.mode === 'agent') {
+          Object.assign(entry, {mode:'agent', grant_id:grant.id, binding:currentConnection.binding, envelope:messageEnvelope(e), status:'pending', reason:'awaiting-agent', lease:null, decision:null});
+          save(data); return;
+        }
         if (command.task_id && !store.index().some(t => t.id === command.task_id)) { entry.reason = 'unknown-task'; save(data); return; }
         if (['list', 'show'].includes(command.verb)) {
           const tasks = command.task_id ? [store.get(command.task_id)] : store.all().filter(t => covers(grant.tasks, t.id));
@@ -295,6 +312,7 @@ export function createIntegration({store, scheduler}) {
     return {ingested, has_more: page.has_more};
   }
   async function run(args) {
+    if (args.command.startsWith('message-')) return messages.run(args);
     if (args.command === 'start') {
       const timeout = args.timeout_ms === undefined ? 30000 : Number(args.timeout_ms);
       if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > 60000) throw new ConnectorError('timeout-ms must be 0..60000');
@@ -307,9 +325,10 @@ export function createIntegration({store, scheduler}) {
           catch { if (!gaps.includes(c.id)) gaps.push(c.id); }
         }
         notifications.push(...(await deliver({consumer, limit: args.limit ?? 10, lease_ms: args.lease_ms})).notifications);
-        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
-        if (queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
-          return {...queued, ingested, notifications, receive_gaps: gaps, readiness: connections.length ? 'configured-bindings; live transport not attested' : 'local-only; no server binding'};
+        const claimed = await messages.claim({consumer,limit:args.limit ?? 1,lease_ms:args.lease_ms});
+        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: claimed.messages.length ? 0 : Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
+        if (claimed.messages.length || queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
+          return {...queued, messages:claimed.messages, ingested, notifications, receive_gaps: gaps, readiness: connections.length ? 'configured-bindings; live transport not attested' : 'local-only; no server binding'};
         }
       } while (true);
     }
@@ -337,7 +356,7 @@ export function createIntegration({store, scheduler}) {
       const data = readIntegration(store), cmd = args.command;
       if (cmd === 'connections') return data.connections;
       if (cmd === 'outbox') return data.outbox.filter(n => args.all || !['api_accepted', 'cancelled'].includes(n.state)).map(publicNotice);
-      if (cmd === 'inbound') return {checkpoints: data.checkpoints, outcomes: data.inbox};
+      if (cmd === 'inbound') return {checkpoints: data.checkpoints, outcomes: data.inbox.map(r => agentMessage(r) ? {id:r.id,event_key:r.event_key,connector:r.connector,grant_id:r.grant_id,mode:r.mode,status:r.status,reason:r.reason,task_id:r.task_id??null,summary:r.decision?.summary??null} : r)};
       if (['disconnect', 'unwatch', 'deny-inbound'].includes(cmd)) {
         const list = cmd === 'disconnect' ? data.connections : cmd === 'unwatch' ? data.watches : data.grants;
         const item = list.find(v => v.id === args.id); if (!item) throw new ConnectorError('Unknown binding');
@@ -357,12 +376,21 @@ export function createIntegration({store, scheduler}) {
           p.events = csv(args.events, EVENTS); p.language = args.language ?? 'en'; if (!['en', 'zh'].includes(p.language)) throw new ConnectorError('Invalid language'); list = data.watches;
         } else {
           if (!c.capabilities.receive || !c.capabilities.durable_cursor) throw new ConnectorError('Durable inbox capability required');
-          p.tenant = requireText(args.tenant, 'tenant'); p.sender = requireText(args.sender, 'sender'); p.commands = csv(args.commands, ['list', 'show', 'run', 'verify']);
+          p.tenant = requireText(args.tenant, 'tenant'); p.sender = requireText(args.sender, 'sender');
+          if (!['commands','agent'].includes(args.mode ?? 'commands')) throw new ConnectorError('Invalid inbound mode');
+          if (args.mode === 'agent') {
+            p.mode = 'agent'; p.allow_new = Boolean(args.allow_new); p.updates = Boolean(args.updates);
+            p.commands = csv(args.commands, ['query','create','continue']);
+            if (p.commands.includes('create') !== p.allow_new) throw new ConnectorError('Create scope and allow-new must be explicitly enabled together');
+          } else {
+            if (args.allow_new || args.updates) throw new ConnectorError('Agent options require agent mode');
+            p.commands = csv(args.commands, ['list','show','run','verify']);
+          }
           p.reply_mode = args.reply_mode ?? 'reply';
           if (!['reply', 'send'].includes(p.reply_mode)) throw new ConnectorError('Invalid reply mode');
           // Only list/show produce responses. Dispatch-only grants need no
           // outbound method or output format capability, including verify.
-          if (p.commands.some(command => ['list', 'show'].includes(command))) requireOutbound(p.reply_mode);
+          if (p.mode === 'agent' || p.commands.some(command => ['list', 'show'].includes(command))) requireOutbound(p.reply_mode);
           p.since = args.since ?? data.grants.find(g => g.id === p.id)?.since ?? stamp(); if (!Number.isFinite(Date.parse(p.since))) throw new ConnectorError('Invalid authorization start time'); list = data.grants;
         }
         const prior = list.find(v => v.id === p.id);
