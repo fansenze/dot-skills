@@ -13,6 +13,9 @@ My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected com
 Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills.
 In my private chat with the bot, let me manage my existing and new dot/Codex tasks
 through natural language. Send an initial overview and meaningful progress updates there.
+
+Follow my instructions exactly and execute promptly. Do not speculate about my config,
+run content checks on it, or add unrelated checks or actions.
 ```
 
 The path identifies the configuration source; the prompt explicitly selects dot hosting and authorizes copying that selected configuration to dot for setup. A minimal YAML file has quoted, nonempty `app_id` and `app_secret` strings; `brand` defaults to `feishu`. Use the internal Library skill to upload the selected file from its computer, materialize it on dot, and verify its exact bytes before using the dot-local path. Preserve the file unchanged throughout transfer. A first-time private chat still needs identity verification below; the prompt does not claim that verification has already happened.
