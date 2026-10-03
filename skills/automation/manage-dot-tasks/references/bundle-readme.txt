@@ -2,7 +2,8 @@ Manage Dot Tasks with Feishu Message Server (connector protocol 1)
 
 This archive contains three complete independent skills: manage-dot-tasks,
 feishu-message-server and remote-config-bridge. It is not an installed service.
-Read manage-dot-tasks/SKILL.md and references/connectors.md first. The agent wires
+Start with manage-dot-tasks/SKILL.md and its references/startup.md.
+Use references/connectors.md for the command and transport contract. The agent wires
 the direct Feishu adapter for same-environment paths or the bridge adapter
 for a user-computer configuration; the user writes no glue code.
 The server remains a transport and does not interpret task commands.

@@ -113,10 +113,12 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
   if (prior && digest(prior.results) !== digest(current.results)) kinds.push('result');
   if (prior && digest(prior.execution) !== digest(current.execution)) kinds.push('execution');
   let changed = false;
+  const watchedRoutes = [];
   for (const watch of data.watches) {
     const connection = data.connections.find(c => c.id === watch.connector && c.enabled);
     if (!connection || !watch.enabled || !covers(watch.tasks, task.id) || !watch.events.some(k => kinds.includes(k))) continue;
     enqueue(data, `task:${task.id}:${task.revision}`, routeFor(connection, watch), document([task], watch.language), task.id);
+    watchedRoutes.push(routeFor(connection, watch));
     changed = true;
   }
   // Progress follows an explicit updates grant and an agent-recorded association.
@@ -125,7 +127,12 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
     const connection = data.connections.find(c => c.id === grant.connector && c.enabled);
     const anchor = data.inbox.filter(r => agentMessage(r) && r.grant_id === grant.id && r.task_id === task.id && r.decision && ['create','continue'].includes(r.decision.decision)).at(-1);
     if (!connection || !anchor || !grantCovers(data,grant,task.id)) continue;
-    enqueue(data, 'task:'+task.id+':'+task.revision, routeFor(connection,grant), document([task]), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null);
+    const route = routeFor(connection, grant);
+    // A watch is the primary task-update route. Keep decision replies separate.
+    if (watchedRoutes.some(w => w.connector_id === route.connector_id && w.binding === route.binding &&
+      w.account_id === route.account_id && w.destination.id === route.destination.id &&
+      w.destination.type === route.destination.type && w.format === route.format)) continue;
+    enqueue(data, 'task:'+task.id+':'+task.revision, route, document([task]), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null);
     changed = true;
   }
   return changed ? writes(data) : {};
