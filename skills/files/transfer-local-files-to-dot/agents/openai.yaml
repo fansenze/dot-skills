@@ -1,7 +1,7 @@
 interface:
   display_name: "Transfer Local Files to dot"
   short_description: "Move authorized local files to dot through Library"
-  default_prompt: "Use $transfer-local-files-to-dot to copy the ordinary files I selected from my connected computer to dot, verifying their integrity."
+  default_prompt: "Use $transfer-local-files-to-dot to copy the files or Feishu configuration I selected from my connected computer to dot through Library, preserving their bytes and verifying their integrity."
   icon_small: "assets/icon.svg"
   icon_large: "assets/icon.svg"
 policy:

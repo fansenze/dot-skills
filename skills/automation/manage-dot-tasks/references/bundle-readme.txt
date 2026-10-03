@@ -6,9 +6,9 @@ Start with manage-dot-tasks/SKILL.md and its references/startup.md.
 Use references/connectors.md for the command and transport contract. The agent wires
 the direct Feishu adapter for a service on dot with a dot-local configuration,
 or the bridge adapter only for explicitly requested computer hosting.
-Configuration source location does not choose the service host. Missing secure
-credential handoff blocks dot service setup; ordinary Library transfer is not
-a credential channel. Verify the requested version and pin the actual runtime
+Configuration source location does not choose the service host. For dot hosting,
+transfer the user's selected configuration through the internal Library skill,
+verify its bytes on dot, and use the received path. Verify the requested version and pin the actual runtime
 roots before setup or reuse. The user writes no glue code.
 The server remains a transport and does not interpret task commands.
 

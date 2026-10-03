@@ -15,7 +15,7 @@ app_id: "YOUR_APP_ID"
 app_secret: "YOUR_APP_SECRET"
 ```
 
-Both values come from your app's **Credentials & Basic Info** in the [Feishu developer console](https://open.feishu.cn/app): `app_id` identifies the app; `app_secret` authenticates it. Keep the quotes. These are the only required fields; `brand` defaults to `feishu` (add `brand: "lark"` for Lark). Chat IDs are resolved separately and do not belong in this file. Keep secrets out of chat and ordinary Library uploads. A service running on dot needs a configuration already available there or a supported secure handoff completed by the user; this skill cannot waive platform credential restrictions. If no supported handoff is available, dot reports that blocker before starting the service.
+Both values come from your app's **Credentials & Basic Info** in the [Feishu developer console](https://open.feishu.cn/app): `app_id` identifies the app; `app_secret` authenticates it. Keep the quotes. These are the only required fields; `brand` defaults to `feishu` (add `brand: "lark"` for Lark). Chat IDs are resolved separately and do not belong in this file. For a service running on dot, reuse a configuration already there or transfer your selected configuration through the internal Library skill, preserving its bytes and verifying the received file before setup.
 
 For a new app, enable its bot capability and follow [Feishu app settings](skills/messaging/feishu-message-server/references/operations.md#feishu-app-settings) for message permissions and long-connection events. Dot can help finish connection setup during startup.
 
@@ -30,7 +30,7 @@ In my private chat with the bot, let me manage my existing and new dot/Codex tas
 through natural language. Send an initial overview and meaningful progress updates there.
 ```
 
-Dot checks the requested version and existing installation, then reuses a matching setup on the selected host. A missing secure configuration handoff blocks the dot service; it never silently starts a Mac service instead. On first use, dot may ask you to send the bot one private message, then checks sender/chat ownership before enabling intake or sending task information. An already verified chat is reused without another introductory message.
+Dot checks the requested version and existing installation, then reuses a matching setup on the selected host. This request authorizes transferring the specified configuration to dot through Library and using the verified dot-local copy. On first use, dot may ask you to send the bot one private message, then checks sender/chat ownership before enabling intake or sending task information. An already verified chat is reused without another introductory message.
 
 If you explicitly want **the Feishu service on your connected computer**, say so and name that computer. Dot then uses Remote Config Bridge, keeping the configuration and transport there while task management remains on dot. If service location is missing or ambiguous, dot asks before starting either route.
 

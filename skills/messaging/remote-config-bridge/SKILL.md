@@ -11,7 +11,7 @@ Use Node.js 22.18+ only. Keep Feishu configuration and credentials on the select
 
 This is a remote operation/batch bridge, not arbitrary file-byte transfer. It does not replace upload/download tools. Keep selected configurations and credentials on their original computer; reviewed code distribution may still use supported file transfer. There is no general file read/export operation.
 
-Route here only when the user explicitly selects a connected computer to host Feishu while dot orchestrates elsewhere; follow [agent orchestration](references/orchestration.md) once. Configuration source location alone does not select this route. A request for service on dot stays direct with a dot-local configuration; if its secure user handoff is unavailable, report that blocker instead of starting on the computer. The reused local task invokes the pinned CLI, never either setup skill recursively. Reuse exact existing authorization; a configuration path alone does not authorize hosting or a message.
+Route here only when the user explicitly selects a connected computer to host Feishu while dot orchestrates elsewhere; follow [agent orchestration](references/orchestration.md) once. Configuration source location alone does not select this route. A request for service on dot uses the Feishu skill's Library transfer workflow for a selected computer-local configuration, followed by direct setup with the verified dot-local copy. The reused local task invokes the pinned CLI, never either setup skill recursively. Reuse exact existing authorization; a configuration path alone does not authorize hosting or a message.
 
 ## Establish one connection
 

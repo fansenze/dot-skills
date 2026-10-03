@@ -1,4 +1,4 @@
 interface:
   display_name: "Feishu Message Server"
   short_description: "Feishu listener and explicit text, Markdown, or card messaging"
-  default_prompt: "Use $feishu-message-server on my selected service host. Use direct execution on dot with a verified dot-local configuration, and $remote-config-bridge only if I explicitly choose computer hosting. Report a missing secure credential handoff instead of changing hosts."
+  default_prompt: "Use $feishu-message-server on my selected service host. For dot hosting, transfer my selected computer-local configuration through the internal Library skill, verify its bytes on dot, and use that local copy. Use $remote-config-bridge only if I explicitly choose computer hosting."

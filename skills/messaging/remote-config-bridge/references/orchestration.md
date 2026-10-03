@@ -1,6 +1,6 @@
 # Agent orchestration: configuration stays on its computer
 
-This skill transports remote operation batches and results. It does not transfer arbitrary file bytes and does not replace upload/download tools. The selected configuration and credentials stay on their original computer. Supported jobs are only `send`, `reply` and bounded `receive`; no read-file, export-file, shell or credential-transfer operation exists. Reviewed code distribution may still require supported file transfer or official Library materialization. Transfer code only, using that mechanism's own authorization and byte verification. Do not put the configuration into Library.
+This skill transports remote operation batches and results. It does not transfer arbitrary file bytes and does not replace upload/download tools. For this computer-hosted route, the selected configuration and credentials stay on that computer. Supported jobs are only `send`, `reply` and bounded `receive`; no read-file, export-file or shell operation exists. Reviewed code distribution may still require supported file transfer or official Library materialization using its authorization and byte verification. Dot-hosted configuration transfer belongs to the Feishu workflow below.
 
 The agent performs the steps below. These are operational recipes, not an SDK or a new platform API. Inspect the currently exposed environment/task tool schemas and use actual returned IDs. `cloud_threads.create`, `cloud_threads.send_message` and `cloud_threads.read` are calls by the active dot; Node never invokes them. If they are unavailable, report remote orchestration unavailable and retain local task work. Do not substitute a cloud process that tries to open the user's computer path.
 
@@ -10,7 +10,7 @@ The agent performs the steps below. These are operational recipes, not an SDK or
 | --- | --- |
 | Connected computer, explicitly selected while dot manages tasks | Invoke this bridge; execute Feishu commands in one verified task on that host |
 | Dot, with a verified dot-local configuration | Use the Feishu CLI and direct adapter on dot; no local bridge worker |
-| Dot, but configuration exists only on a connected computer | Require a supported secure user handoff; report a blocker if unavailable, never infer computer hosting |
+| Dot, but configuration exists only on a connected computer | Follow the Feishu skill's internal Library transfer workflow, verify the received bytes, then use direct setup on dot |
 | Service host unresolved | Ask which host should run Feishu before startup; a source path alone does not choose it |
 
 The Feishu skill delegates remote orchestration here once. The local task invokes Feishu's CLI, not the Feishu setup skill, so there is no recursive delegation. The bridge never calls its own skill through the worker. A request for configuration does not authorize sending, recipient discovery beyond existing permissions, or a notification subscription. Carry existing exact startup, content, destination and task-scope authorization forward; ask only for missing information. Do not repeat a permission prompt or scan unrelated files to classify secrets.

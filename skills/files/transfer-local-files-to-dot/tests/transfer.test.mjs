@@ -39,7 +39,11 @@ test('reject source root symlink', async t => { const f = await fixture(t); cons
 test('reject nested symlink without dereferencing', async t => { const f = await fixture(t); await fs.symlink('/not-a-real-target', path.join(f.source, 'link')); await assert.rejects(pack(f.source, path.join(f.dir, 'out')), e => e.code === 'SYMLINK_REJECTED'); });
 test('reject hardlinks', async t => { const f = await fixture(t); await fs.link(path.join(f.source, 'hello.txt'), path.join(f.source, 'hard')); await assert.rejects(pack(f.source, path.join(f.dir, 'out')), e => e.code === 'UNSAFE_FILE'); });
 test('reject archive symlink', async t => { const f = await fixture(t); const a = await pack(f.source, path.join(f.dir, 'p')); const link = path.join(f.dir, 'link.tar'); await fs.symlink(a.archive_path, link); await assert.rejects(verify(link, a.archive_sha256, a.archive_bytes), e => e.code === 'UNSAFE_FILE'); });
-for (const name of ['.env', '.env.local', '.git', '.ssh', '.aws', '.codex', 'credentials.json', 'private.pem']) test(`reject sensitive name ${name}`, async t => { const f = await fixture(t); await fs.writeFile(path.join(f.source, name), 'synthetic'); await assert.rejects(pack(f.source, path.join(f.dir, 'out')), e => e.code === 'SENSITIVE_PATH'); });
+for (const name of ['.env', '.env.local', '.git', '.ssh', '.aws', '.codex', 'credentials.json', 'private.pem']) test(`preserve selected filename ${name}`, async t => {
+  const f = await fixture(t); const source = path.join(f.source, name); const payload = Buffer.from('synthetic\r\n'); await fs.writeFile(source, payload);
+  const a = await pack(source, path.join(f.dir, 'p')); const e = await extract(a.archive_path, a.archive_sha256, a.archive_bytes, path.join(f.dir, 'out'));
+  assert.deepEqual(await fs.readFile(e.consumer_local_root), payload); assert.deepEqual(await fs.readFile(source), payload);
+});
 test('reject duplicate case-insensitive source paths', async t => { const f = await fixture(t); await fs.writeFile(path.join(f.source, 'HELLO.TXT'), 'collision'); const names = await fs.readdir(f.source); if (!(names.includes('hello.txt') && names.includes('HELLO.TXT'))) { t.skip('Filesystem cannot create case-distinct siblings; archive collision test remains active'); return; } await assert.rejects(pack(f.source, path.join(f.dir, 'out')), e => e.code === 'DUPLICATE_PATH'); });
 test('reject nonportable filename', async t => { const f = await fixture(t); await fs.writeFile(path.join(f.source, 'CON.txt'), 'collision'); await assert.rejects(pack(f.source, path.join(f.dir, 'out')), e => e.code === 'UNSAFE_PATH'); });
 test('reject oversized sparse source before reading it', async t => { const f = await fixture(t); const large = path.join(f.source, 'large.bin'); await fs.writeFile(large, ''); await fs.truncate(large, 100 * 1024 * 1024 + 1); await assert.rejects(pack(f.source, path.join(f.dir, 'out')), e => e.code === 'LIMIT_EXCEEDED'); });
@@ -58,14 +62,19 @@ test('reject appended data', async t => { const a = await altered(t, b => Buffer
 test('reject corrupted padding', async t => { const a = await altered(t, (b, o) => { b[o[0].body + o[0].size] = 1; }); await assertRejected(a, 'INVALID_ARCHIVE'); });
 test('reject oversized archive length before opening', async t => { const f = await fixture(t); await assert.rejects(verify(path.join(f.dir, 'none'), '0'.repeat(64), 216 * 1024 * 1024 + 1), e => e.code === 'INVALID_ARGUMENT'); });
 test('USTAR prefix and non-ASCII names survive', async t => { const f = await fixture(t); const nested = path.join(f.source, 'a'.repeat(70)); await fs.mkdir(nested); await fs.writeFile(path.join(nested, 'b'.repeat(60)), 'long path'); const a = await pack(f.source, path.join(f.dir, 'p')); const e = await extract(a.archive_path, a.archive_sha256, a.archive_bytes, path.join(f.dir, 'out')); assert.equal(await fs.readFile(path.join(e.consumer_local_root, 'a'.repeat(70), 'b'.repeat(60)), 'utf8'), 'long path'); });
-test('CLI reports structured errors and rejects unknown bypass flags', () => { const script = fileURLToPath(new URL('../scripts/transfer.mjs', import.meta.url)); const r = spawnSync(process.execPath, [script, 'pack', '--source', '/fake', '--output', '/fake', '--allow-secrets', 'true'], { encoding: 'utf8' }); assert.equal(r.status, 2); assert.equal(JSON.parse(r.stderr).code, 'INVALID_ARGUMENT'); });
+test('CLI reports structured errors and rejects unknown flags', () => { const script = fileURLToPath(new URL('../scripts/transfer.mjs', import.meta.url)); const r = spawnSync(process.execPath, [script, 'pack', '--source', '/fake', '--output', '/fake', '--unknown', 'true'], { encoding: 'utf8' }); assert.equal(r.status, 2); assert.equal(JSON.parse(r.stderr).code, 'INVALID_ARGUMENT'); });
 test('CLI help has no transport claim', () => { const script = fileURLToPath(new URL('../scripts/transfer.mjs', import.meta.url)); const r = spawnSync(process.execPath, [script, '--help'], { encoding: 'utf8' }); assert.equal(r.status, 0); assert.match(r.stdout, /No upload\/download capability/); });
 
 test('reject source symlink with trailing slash', async t => { const f = await fixture(t); const link = path.join(f.dir, 'alias'); await fs.symlink(f.source, link); await assert.rejects(pack(link + '/', path.join(f.dir, 'out')), e => e.code === 'SYMLINK_REJECTED'); });
 test('reject source under symlink ancestor', async t => { const f = await fixture(t); const link = path.join(f.dir, 'alias'); await fs.symlink(f.source, link); await assert.rejects(pack(path.join(link, 'hello.txt'), path.join(f.dir, 'out')), e => e.code === 'SYMLINK_REJECTED'); });
 test('reject source traversal components', async t => { const f = await fixture(t); await assert.rejects(pack(f.source + '/Nested/../hello.txt', path.join(f.dir, 'out')), e => e.code === 'UNSAFE_PATH'); });
 
-test('reject ordinary filename under sensitive ancestor', async t => { const f = await fixture(t); const parent = path.join(f.dir, '.ssh'); await fs.mkdir(parent); const file = path.join(parent, 'config'); await fs.writeFile(file, 'synthetic'); await assert.rejects(pack(file, path.join(f.dir, 'out')), e => e.code === 'SENSITIVE_PATH'); });
+test('selected configuration directory round trip preserves nested files', async t => {
+  const f = await fixture(t); const source = path.join(f.dir, '.config'); const parent = path.join(source, 'dot'); await fs.mkdir(parent, { recursive: true });
+  const payload = Buffer.from('app_id: "synthetic-app"\r\napp_secret: "synthetic-only"\r\n'); await fs.writeFile(path.join(parent, 'feishu.yml'), payload);
+  const a = await pack(source, path.join(f.dir, 'p')); const e = await extract(a.archive_path, a.archive_sha256, a.archive_bytes, path.join(f.dir, 'out'));
+  assert.deepEqual(await fs.readFile(path.join(e.consumer_local_root, 'dot', 'feishu.yml')), payload);
+});
 for (const name of ['.dot-transfer-manifest.json', '.DOT-TRANSFER-MANIFEST.JSON']) test(`reject reserved root ${name}`, async t => { const f = await fixture(t); const file = path.join(f.dir, name); await fs.writeFile(file, 'synthetic'); await assert.rejects(pack(file, path.join(f.dir, 'out')), e => e.code === 'UNSAFE_PATH'); });
 
 test('reject high-bit type byte', async t => { const a = await altered(t, (b, o) => { b[o[1].h + 156] |= 128; recheck(b, o[1].h); }); await assertRejected(a, 'INVALID_ARCHIVE'); });
@@ -74,9 +83,10 @@ test('reject high-bit numeric fields', async t => { const a = await altered(t, (
 
 test('reject case-insensitive duplicate archive paths on every filesystem', async t => { const a = await altered(t, (b, o) => field(b, o[2].h, 0, 100, 'EXAMPLE')); await assertRejected(a, 'DUPLICATE_PATH'); });
 
-test('opaque synthetic payload is preserved byte-for-byte without scanning', async t => {
+test('selected Feishu configuration beneath .config is preserved byte-for-byte', async t => {
   const f = await fixture(t); const payload = Buffer.from('app_secret: SYNTHETIC-NOT-A-CREDENTIAL\nverification_token: SYNTHETIC-NOT-A-CREDENTIAL\ntext: 0001\n');
-  const source = path.join(f.dir, 'ordinary-fixture.yml'); await fs.writeFile(source, payload);
+  const parent = path.join(f.dir, '.config', 'dot'); await fs.mkdir(parent, { recursive: true });
+  const source = path.join(parent, 'feishu.yml'); await fs.writeFile(source, payload);
   const a = await pack(source, path.join(f.dir, 'p')); const e = await extract(a.archive_path, a.archive_sha256, a.archive_bytes, path.join(f.dir, 'out'));
   assert.deepEqual(await fs.readFile(e.consumer_local_root), payload); assert.deepEqual(await fs.readFile(source), payload);
 });

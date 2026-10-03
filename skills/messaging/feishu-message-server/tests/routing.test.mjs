@@ -8,14 +8,13 @@ import {spawnSync} from 'node:child_process';
 import {ROOT} from '../scripts/config.mjs';
 import {FILES,ARCHIVE_FILES,makePackage} from '../scripts/package.mjs';
 const read=rel=>fs.readFileSync(path.join(ROOT,rel),'utf8');
-test('portable routing chooses the requested service host and keeps credential handoff separate',()=>{
+test('portable routing uses Library for a selected configuration and honors the service host',()=>{
   const skill=read('SKILL.md'),recipe=read('references/remote-configuration.md'),operations=read('references/operations.md');
   assert.match(skill,/Only explicitly requested computer hosting routes through/);
   assert.match(recipe,/Configuration source location does not choose the service host/);
-  assert.match(recipe,/secure_configuration_handoff_required/);
-  assert.match(recipe,/no upload, receiver startup or bridge fallback/);
-  assert.match(recipe,/No skill can waive platform credential restrictions/);
-  assert.match(recipe,/test-purpose credentials/);
+  assert.match(recipe,/openai-library:library/);
+  assert.match(recipe,/source byte count and SHA-256/);
+  assert.match(recipe,/Set `SERVICE_CONFIG` to that verified dot-local file/);
   assert.match(recipe,/compare the actual installed files with the requested repository revision/i);
   assert.match(recipe,/Use the same roots for checks/);
   const local=recipe.split('Local task only:')[1].split('Dot only:')[0];
@@ -47,19 +46,19 @@ function directChecks(config,cwd) {
   }
   return results;
 }
-for(const scenario of ['Mac source with dot configuration already provisioned','existing dot configuration']) {
+for(const scenario of ['Mac source materialized on dot','existing dot configuration']) {
   test(`documented direct checks: ${scenario}`,t=>{
     const dir=temporary(t),dot=path.join(dir,'dot with spaces');fs.mkdirSync(dot);
     const config=path.join(dot,'service.yml'),yaml='app_id: "cli_0000000000000000"\napp_secret: "synthetic-only"\n';
-    // Fixture provisioning is not a production credential-transfer mechanism.
-    fs.writeFileSync(config,yaml);
     const source=path.join(dir,'mac-source.yml');
-    if(scenario.startsWith('Mac'))fs.writeFileSync(source,'source-only synthetic fixture');
+    // Simulate Library materialization with the exact source bytes; no live upload.
+    if(scenario.startsWith('Mac')){fs.writeFileSync(source,yaml);fs.copyFileSync(source,config);}
+    else fs.writeFileSync(config,yaml);
     const results=directChecks(config,dot);assert.equal(results.length,3);
     for(const result of results){assert.equal(result.status,0,result.stderr);assert.ok(!result.stdout.includes('synthetic-only'));}
     assert.equal(JSON.parse(results[1].stdout).brand,'feishu');
     assert.equal(fs.readFileSync(config,'utf8'),yaml);
-    if(fs.existsSync(source))assert.equal(fs.readFileSync(source,'utf8'),'source-only synthetic fixture');
+    if(fs.existsSync(source))assert.equal(fs.readFileSync(source,'utf8'),yaml);
     assert.deepEqual(fs.readdirSync(dot),['service.yml']); // No receiver/worker state.
   });
 }

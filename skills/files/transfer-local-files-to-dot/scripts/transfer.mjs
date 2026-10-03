@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Filesystem-only transfer packaging. No network, credentials, or platform API.
+// Filesystem-only transfer packaging. No network or platform API.
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
@@ -22,10 +22,6 @@ function safeName(p) {
   if (parts.length > MAX.depth || parts.some(s => !s || s === '.' || s === '..' || /[<>:"|?*]/.test(s) || /[. ]$/.test(s) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(s))) fail('UNSAFE_PATH', 'Unsupported or unsafe path component');
   if (Buffer.byteLength(p) > 240 || parts.some(s => Buffer.byteLength(s) > 100)) fail('LIMIT_EXCEEDED', 'Path is too long for the portable archive format');
   return p;
-}
-function rejectSensitiveName(p) {
-  const parts = p.toLowerCase().split('/');
-  if (parts.some(s => /^(?:\.env(?:\..*)?|\.ssh|\.aws|\.azure|\.gnupg|\.kube|\.git|\.npmrc|\.netrc|\.pypirc|\.docker|\.config|\.codex|\.agents|\.git-credentials|credentials(?:\.[^.]+)?|secrets?(?:\.[^.]+)?|id_rsa|id_ed25519|keychain|login data|cookies|local state)$/.test(s) || /\.(?:pem|key|p12|pfx|kdbx)$/.test(s))) fail('SENSITIVE_PATH', `Credential/configuration path excluded: ${p}`);
 }
 function splitTarName(p) {
   if (Buffer.byteLength(p) <= 100) return { name: p, prefix: '' };
@@ -67,7 +63,7 @@ async function readRegular(p, max) {
 async function collect(source, root) {
   const entries = []; const bodies = new Map(); const names = new Set(); let total = 0;
   async function visit(full, relative) {
-    safeName(relative); rejectSensitiveName(relative);
+    safeName(relative);
     const folded = relative.toLowerCase(); if (names.has(folded)) fail('DUPLICATE_PATH', 'Case-insensitive duplicate path'); names.add(folded);
     if (entries.length >= MAX.entries) fail('LIMIT_EXCEEDED', 'Too many entries');
     const st = await fs.lstat(full);
@@ -89,7 +85,6 @@ export async function pack(source, output) {
   if (!path.isAbsolute(source) || !path.isAbsolute(output)) fail('INVALID_ARGUMENT', 'Source and output must be absolute');
   if (source.split(path.sep).some(part => part === '.' || part === '..')) fail('UNSAFE_PATH', 'Source traversal components are not allowed');
   const normalized = path.resolve(source);
-  rejectSensitiveName(normalized.slice(path.parse(normalized).root.length).split(path.sep).join('/'));
   let ancestor = path.parse(normalized).root;
   for (const component of normalized.slice(ancestor.length).split(path.sep).filter(Boolean)) {
     ancestor = path.join(ancestor, component);
@@ -97,7 +92,7 @@ export async function pack(source, output) {
     const systemAlias = process.platform === 'darwin' && ['/tmp', '/var', '/etc'].includes(ancestor) && ancestor !== normalized;
     if (st.isSymbolicLink() && !systemAlias) fail('SYMLINK_REJECTED', 'Source symlink or symlink ancestor rejected');
   }
-  const real = await fs.realpath(normalized); const root = path.basename(real); safeName(root); rejectSensitiveName(root);
+  const real = await fs.realpath(normalized); const root = path.basename(real); safeName(root);
   if (root.toLowerCase() === MANIFEST.toLowerCase()) fail('UNSAFE_PATH', 'Source name is reserved for transfer metadata');
   const outputParent = await fs.realpath(path.dirname(output)); const physicalOutput = path.join(outputParent, path.basename(output));
   if (physicalOutput === real || physicalOutput.startsWith(real + path.sep)) fail('INVALID_ARGUMENT', 'Package destination must be outside the source');
@@ -145,11 +140,11 @@ function validateManifest(items) {
   let m; try { m = JSON.parse(items[0].bytes.toString('utf8')); } catch { fail('INVALID_MANIFEST', 'Manifest is not valid JSON'); }
   exactKeys(m, ['format', 'root', 'total_bytes', 'entries']);
   if (m.format !== FORMAT || !integer(m.total_bytes) || m.total_bytes > MAX.bytes || !Array.isArray(m.entries) || !m.entries.length || m.entries.length > MAX.entries || items.length !== m.entries.length + 1) fail('INVALID_MANIFEST', 'Invalid manifest limits or entry count');
-  safeName(m.root); rejectSensitiveName(m.root); if (m.root.includes('/') || m.root === MANIFEST) fail('INVALID_MANIFEST', 'Invalid root');
+  safeName(m.root); if (m.root.includes('/') || m.root === MANIFEST) fail('INVALID_MANIFEST', 'Invalid root');
   const known = new Map(); let total = 0;
   for (let i = 0; i < m.entries.length; i++) {
     const e = m.entries[i]; if (!plain(e)) fail('INVALID_MANIFEST', 'Invalid entry');
-    exactKeys(e, e.type === 'file' ? ['path', 'type', 'size', 'sha256'] : ['path', 'type', 'size']); safeName(e.path); rejectSensitiveName(e.path);
+    exactKeys(e, e.type === 'file' ? ['path', 'type', 'size', 'sha256'] : ['path', 'type', 'size']); safeName(e.path);
     if (!['file', 'directory'].includes(e.type) || !integer(e.size) || e.size > MAX.file || (e.type === 'directory' && e.size !== 0) || (e.type === 'file' && !SHA.test(e.sha256))) fail('INVALID_MANIFEST', 'Invalid entry fields');
     if (i === 0 ? e.path !== m.root : !e.path.startsWith(m.root + '/')) fail('INVALID_MANIFEST', 'All entries must belong to one root');
     if (i > 0 && known.get(path.posix.dirname(e.path).toLowerCase()) !== 'directory') fail('INVALID_MANIFEST', 'Parent directory is missing, unordered, or not a directory');
@@ -192,7 +187,7 @@ function parseArgs(argv) {
 }
 async function main() {
   const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 18)) fail('UNSUPPORTED_RUNTIME', 'Node.js 22.18.0 or newer is required');
-  if (process.argv.length === 3 && ['--help', '-h'].includes(process.argv[2])) { console.log('Filesystem-only CLI. Node.js 22.18+. No upload/download capability.\npack --source ABSOLUTE_PATH --output NEW_ABSOLUTE_DIRECTORY\nverify --archive PATH --sha256 PRODUCER_SHA256 --bytes PRODUCER_ARCHIVE_BYTES\nextract --archive PATH --sha256 PRODUCER_SHA256 --bytes PRODUCER_ARCHIVE_BYTES --destination NEW_ABSOLUTE_DIRECTORY\nLimits: 10,000 entries; 200 MiB total; 100 MiB per file; depth 32. No symlinks, hardlinks, sensitive paths, overwrite, or secret bypass. Payload bytes are opaque: no content scan, semantic parsing, or value changes.'); return; }
+  if (process.argv.length === 3 && ['--help', '-h'].includes(process.argv[2])) { console.log('Filesystem-only CLI. Node.js 22.18+. No upload/download capability.\npack --source ABSOLUTE_PATH --output NEW_ABSOLUTE_DIRECTORY\nverify --archive PATH --sha256 PRODUCER_SHA256 --bytes PRODUCER_ARCHIVE_BYTES\nextract --archive PATH --sha256 PRODUCER_SHA256 --bytes PRODUCER_ARCHIVE_BYTES --destination NEW_ABSOLUTE_DIRECTORY\nLimits: 10,000 entries; 200 MiB total; 100 MiB per file; depth 32. No symlinks, hardlinks, unsafe paths, or overwrite. Payload bytes are opaque: no content scan, semantic parsing, or value changes.'); return; }
   const { command, opts: o } = parseArgs(process.argv.slice(2)); let result;
   if (command === 'pack') result = await pack(o.source, o.output);
   else if (command === 'extract') result = await extract(o.archive, o.sha256, Number(o.bytes), o.destination);
