@@ -6,9 +6,9 @@ These scenarios test the canonical [startup workflow](../references/startup.md).
 
 - **Procedure-heavy baseline:** the previous README asked the user to recite routing, dependencies, receiver reuse, grants, cards, source discovery and start/record/ack loops. It mixed intent with implementation and still allowed a watch plus grant to duplicate updates.
 - **Too short:** “Install and start task management” supplies neither a Feishu destination nor intake/notification scope. Correct outcome is local setup plus a focused question, not silently enabling everything.
-- **Selected primary:** “Install and start Manage Dot Tasks with Feishu. Use my verified private chat to manage my existing and new dot/Codex tasks through natural language. Send an initial overview and meaningful updates there.” It supplies the missing product intent, recipient and bounded task category; the skill supplies procedure.
+- **Selected primary:** the [path-first startup prompt](../references/startup.md#interpret-intent-then-fill-only-real-gaps) supplies a quoted absolute configuration path and owning computer, private-chat intent, existing/new dot/Codex task scope, natural-language intake and initial/progress updates. It does not assume a first-time chat is already verified; the skill resolves identity before enabling intake or disclosure. Minimal configuration uses quoted `app_id`/`app_secret` strings and stays on its original computer.
 - **New-only alternative:** state only tasks created through the chat and their progress/results. No pre-existing task disclosure or initial all-task watch.
-- **Resume:** reuse existing verified setup and scope. Read revoked/disabled state first; a generic setup request is not authorization to undo a revocation.
+- **Resume:** supply the same selected configuration path/computer and reuse the existing verified chat and scope. Read revoked/disabled state first; a generic setup request is not authorization to undo a revocation.
 
 ## Executable local experiments
 

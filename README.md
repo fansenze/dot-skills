@@ -4,31 +4,53 @@ Reusable skills for task management, Feishu messaging, and verified file transfe
 
 ## Start task management with Feishu
 
-Copy this into dot to manage your existing and new dot/Codex tasks:
+### 1. Prepare your local configuration
 
-```text
-Install and start Manage Dot Tasks with Feishu from https://github.com/fansenze/dot-skills.
-Use my verified private chat to manage my existing and new dot/Codex tasks
-through natural language. Send an initial overview and meaningful updates there.
+Already have a working Feishu configuration? Keep that file and use its path in step 2.
+
+Otherwise, create a plain-text file named `feishu.yml` on your computer, outside this repository (for example, `~/.config/dot/feishu.yml`). Paste this YAML and replace both placeholders locally:
+
+```yaml
+app_id: "YOUR_APP_ID"
+app_secret: "YOUR_APP_SECRET"
 ```
 
-Dot reuses your verified configuration and chat mapping, or asks for the missing details. It sets up the required skills, routes transport to the computer that owns the configuration, and reuses a matching receiver. Credentials stay there. No integration code is needed. The active loop runs while dot is active; it cannot wake an inactive dot.
+Both values come from your app's **Credentials & Basic Info** in the [Feishu developer console](https://open.feishu.cn/app): `app_id` identifies the app; `app_secret` authenticates it. Keep the quotes. These are the only required fields; `brand` defaults to `feishu` (add `brand: "lark"` for Lark). Chat IDs are resolved separately and do not belong in this file. Keep the file and its secret on your computer; give dot only the path, never paste or upload the secret.
 
-For new tasks only, use this alternative:
+For a new app, enable its bot capability and follow [Feishu app settings](skills/messaging/feishu-message-server/references/operations.md#feishu-app-settings) for message permissions and long-connection events. Dot can help finish connection setup during startup.
+
+### 2. Give dot the path and start
+
+Connect the computer that holds the file to dot. Replace the quoted path below with your file's **absolute path** (for example, `/Users/you/.config/dot/feishu.yml`, not `~/.config/dot/feishu.yml`), then copy the prompt into dot. If you have several computers, replace “my connected computer” with its name.
 
 ```text
+Use the Feishu config at "/absolute/path/to/feishu.yml" on my connected computer.
 Install and start Manage Dot Tasks with Feishu from https://github.com/fansenze/dot-skills.
-In my verified private chat, accept ordinary messages to create and continue new tasks,
+In my private chat with the bot, let me manage my existing and new dot/Codex tasks
+through natural language. Send an initial overview and meaningful progress updates there.
+```
+
+Dot handles installation and reuses a matching setup. On first use, it may ask you to send the bot one private message then checks that the sender and chat belong to you before enabling task intake or sending task information. An already verified chat is reused without another introductory message.
+
+### 3. Manage tasks in Feishu
+
+Once dot confirms the connection and your private chat, send ordinary messages such as “What are my tasks?”, “Start a new task to compare these options,” or “Continue the README task.” Dot reports progress and results in that chat. The workflow runs while dot is active; it cannot wake an inactive dot.
+
+For **new tasks only**, replace the last two lines of the startup prompt with:
+
+```text
+In my private chat with the bot, accept ordinary messages to create and continue new tasks,
 and send their progress and results there. Include only tasks created through this chat.
 ```
 
-To resume an already configured workflow:
+To resume, supply the same path and keep the existing scope:
 
 ```text
-Resume Manage Dot Tasks with Feishu using the existing verified setup and scope.
+Resume Manage Dot Tasks with Feishu using the config at "/absolute/path/to/feishu.yml"
+on my connected computer. Reuse the existing verified private chat and task scope.
 ```
 
-You can specify where task work should run, such as “Run my tasks on dot” or “Use my connected Mac.” Transport location does not choose the task executor. Sending messages, creating tasks, and carrying out their actions remain separate permissions. For task management without messaging, ask “Install and initialize Manage Dot Tasks locally, without Feishu.”
+You can add “Run my tasks on dot” or “Use my connected Mac” to choose where task work runs; the config's location does not choose it for you. Task actions still need their usual permissions. For task management without messaging, ask “Install and initialize Manage Dot Tasks locally, without Feishu.”
 
 ## Install an individual skill
 

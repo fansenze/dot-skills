@@ -6,7 +6,16 @@ This is the canonical agent workflow for installing, starting, or resuming Manag
 
 The user supplies outcomes and scope, not implementation instructions. Carry current authorization and verified configuration forward. A request to install and start **with Feishu** includes its matching receiver and active consumer. Installation alone does not. Ordinary-message intake and notifications still need their own stated scopes.
 
-Recommended first-use intent: “Install and start Manage Dot Tasks with Feishu. Use my verified private chat to manage my existing and new dot/Codex tasks through natural language. Send an initial overview and meaningful updates there.”
+Recommended first-use intent:
+
+```text
+Use the Feishu config at "/absolute/path/to/feishu.yml" on my connected computer.
+Install and start Manage Dot Tasks with Feishu from https://github.com/fansenze/dot-skills.
+In my private chat with the bot, let me manage my existing and new dot/Codex tasks
+through natural language. Send an initial overview and meaningful progress updates there.
+```
+
+The path selects an existing local file, not a request to copy it. The user can name the computer when needed; configuration already in the invoking environment stays on the direct route. A minimal YAML file has quoted, nonempty `app_id` and `app_secret` strings; `brand` defaults to `feishu`. Missing values are completed on the owning computer, never in dot chat. A first-time private chat still needs identity verification below; the prompt does not claim that verification has already happened.
 
 - This explicitly scopes intake and disclosure to the user's dot/Codex tasks, including future tasks. Discover that set with actual tools and bind source identities; it is not a grant for unrelated records. Use `--tasks all` only if all current and future records in the selected ledger are within this authorized category. Otherwise resolve selected IDs and ask about any unresolved scope; never expose unrelated ledger entries for convenience. Record partial discovery, and do not call the initial snapshot complete when sources are unavailable.
 - Configure `--mode agent --commands query,create,continue --allow-new --updates --format card`, the verified identity tuple, and the resolved existing-task scope. Add a native-card watch for the same authorized task scope, meaningful events and `--initial`. An initial overview is sent once per watch ID. Notification overlap rules in [connectors.md](connectors.md) prevent a watch plus associated update from duplicating the same task event at the same route/format; decision replies remain separate.

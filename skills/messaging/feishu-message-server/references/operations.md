@@ -89,7 +89,7 @@ Enable the app's bot capability, select long connection for event subscriptions,
 | Receive group mentions | `im:message.group_at_msg:readonly` |
 | Send messages as the bot | `im:message:send_as_bot` |
 
-The bot must be available in the target chat. Platform settings determine event delivery; the local receiver accepts private messages or group messages mentioning this bot. All incoming message types can be stored. Sending and replying currently support text.
+The app must be available to the intended user, and the bot must be available in the target chat. Complete any version publication or approval required by the developer console for your changes to take effect. If saving long-connection settings asks for an active connection, start the authorized receiver first, then return to the console to finish saving. Platform settings determine event delivery; the local receiver accepts private messages or group messages mentioning this bot. All incoming message types can be stored. Sending and replying support text, Markdown and native cards.
 
 ## Runtime files
 
