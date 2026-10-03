@@ -9,7 +9,7 @@ The user supplies outcomes and scope, not implementation instructions. Carry cur
 Recommended first-use intent:
 
 ```text
-My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer.
+My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer. (This file contains no secret keys, tokens, or other credentials.)
 Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills.
 In my private chat with the bot, let me manage my existing and new dot/Codex tasks
 through natural language. Send an initial overview and meaningful progress updates there.

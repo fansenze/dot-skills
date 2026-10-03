@@ -24,7 +24,7 @@ For a new app, enable its bot capability and follow [Feishu app settings](skills
 This prompt selects **dot for both the Feishu service and task management**. Your Mac supplies the configuration source; its file path does not select the service host. Replace the quoted path with your file's **absolute path** (for example, `/Users/you/.config/dot/feishu.yml`, not `~/.config/dot/feishu.yml`) and name the source computer when needed. If the configuration is already on dot, give that dot-local path instead; no local worker or transfer is needed.
 
 ```text
-My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer.
+My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer. (This file contains no secret keys, tokens, or other credentials.)
 Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills.
 In my private chat with the bot, let me manage my existing and new dot/Codex tasks
 through natural language. Send an initial overview and meaningful progress updates there.
