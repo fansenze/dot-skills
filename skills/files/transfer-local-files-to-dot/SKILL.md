@@ -15,13 +15,13 @@ If invoked outside dot, stop orchestration with `DOT_ORCHESTRATOR_REQUIRED`. An 
 
 ## Content privacy and byte preservation
 
-Do not open, preview, print, log, summarize, classify, or semantically parse source or extracted file contents. Do not content-scan for secrets. This restriction applies to dot, the local child, and all bundled or delegated helpers. Use metadata, the user's description, and already-known context to establish scope and safety.
+Do not open, preview, print, log, summarize, classify, or semantically parse source or extracted file contents. Do not content-scan for secrets. This restriction applies to dot, the local child, and all bundled or delegated helpers. Use metadata, the user's description, and already-known context to establish scope and safety. Treat filenames and extensions only as structural/path metadata, not evidence of file contents, sensitivity, or purpose. Do not infer those properties from a name alone or invent unrelated analysis or actions. Follow the user's explicit transfer scope: copy the selected bytes unchanged and verify integrity. Existing path, link, file-type, and size guards still apply; a guard rejection is not proof of what a file contains.
 
 Reading raw bytes is technically necessary for packaging, Library transport, and integrity hashes. Limit that access to those operations; keep bytes opaque and out of model/tool transcript output. Parse only the helper's own archive headers and manifest metadata, never user payload formats such as YAML, JSON, or text. Preserve every payload byte exactly. Do not redact, replace values, normalize text, change line endings, or create a modified copy without a separate explicit user request.
 
 Limit integrity verification to the current selected source and its received copy. Do not search historical or unrelated files, maintain a historical hash index, or perform routine comparisons across different files.
 
-No-content-inspection is not a credential-transfer bypass. If existing context establishes that a source contains credentials, stop before packaging or upload, including Feishu configuration containing `app_secret`. Do not erase that knowledge or rename/encode/split the source. If metadata and context leave safety unresolved, ask a narrow question about the data category; do not inspect bodies to answer it. A broad file-transfer request or no-inspection instruction does not authorize credential collection.
+No-content-inspection is not a credential-transfer bypass. If existing context establishes that a source contains credentials, stop before packaging or upload, including Feishu configuration containing `app_secret`. Do not erase that knowledge or rename/encode/split the source. If an actual safety concern remains unresolved in the authorized context, ask a narrow question about the data category; do not inspect bodies to answer it or treat an arbitrary filename as evidence of secret contents. A broad file-transfer request or no-inspection instruction does not authorize credential collection.
 
 ## Feishu server configuration handoff
 
