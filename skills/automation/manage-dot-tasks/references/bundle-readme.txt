@@ -4,11 +4,17 @@ This archive contains three complete independent skills: manage-dot-tasks,
 feishu-message-server and remote-config-bridge. It is not an installed service.
 Start with manage-dot-tasks/SKILL.md and its references/startup.md.
 Use references/connectors.md for the command and transport contract. The agent wires
-the direct Feishu adapter for same-environment paths or the bridge adapter
-for a user-computer configuration; the user writes no glue code.
+the direct Feishu adapter for a service on dot with a dot-local configuration,
+or the bridge adapter only for explicitly requested computer hosting.
+Configuration source location does not choose the service host. Missing secure
+credential handoff blocks dot service setup; ordinary Library transfer is not
+a credential channel. Verify the requested version and pin the actual runtime
+roots before setup or reuse. The user writes no glue code.
 The server remains a transport and does not interpret task commands.
 
 Requirements: Node.js 22.18+; Feishu dependency installation uses pnpm 11.27.0.
+Put the verified pnpm bin directory first on PATH for every call and verify
+child-process lookup too; a direct pnpm.cjs invocation alone is insufficient.
 Task and bridge runtime/tests need only built-in modules. In feishu-message-server run:
   bash feishu.sh setup
   bash feishu.sh validate

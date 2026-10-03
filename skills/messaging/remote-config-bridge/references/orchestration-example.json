@@ -1,6 +1,7 @@
 {
   "version": 1,
   "scope": "remote-operations-only",
+  "service_host": "explicitly-selected-computer",
   "platform_steps_are": "Recipes mapped by the active agent to current tool schemas; tests simulate these boundaries and never invoke platform tools.",
   "task_selection": {
     "reuse": "Read and reuse the existing verified task on the selected computer.",

@@ -2,7 +2,7 @@
 
 ## Configuration workflow
 
-Follow the [ordered configuration and startup workflow](../SKILL.md#configuration-and-startup). When dot orchestrates a user-computer configuration, complete the [remote routing recipe](remote-configuration.md) and execute the commands below only in the selected local task. Same-environment configurations remain direct. The configuration is not uploaded or copied to dot.
+Follow the [ordered configuration and startup workflow](../SKILL.md#configuration-and-startup). Select the service host from the user's intent, independently of the configuration source. For dot hosting, use a verified dot-local configuration and pinned dot runtime; a computer-only source requires a supported secure user handoff before these commands. If unavailable, report the blocker without uploading credentials to ordinary Library or starting on the source computer. Only explicitly requested computer hosting follows the [bridge recipe](remote-configuration.md); its configuration and transport stay on that computer.
 
 - Usable existing file: reuse it with `check`/`identity`; no preparation or credential copy is needed.
 - Requested preparation: `prepare --config FILE` copies it within its owning environment's temporary directory.
@@ -167,7 +167,7 @@ There is no automatic send retry, timeout extension, or retry loop. When the use
 
 Run `bash feishu.sh package` from the skill directory, or `pnpm package:feishu` from the repository root. If the output file already exists, choose another output filename. The archive contains code, tests, a blank configuration template, documentation, and a generated standalone pnpm lockfile. Packaging selects this skill's importer from the shared lockfile and preserves its dependency resolutions; the exported manifest also receives the root's pinned pnpm version. It excludes local configuration, inbox data, logs, caches, and node_modules.
 
-Copy the code archive to another computer, extract it, and follow the [configuration workflow](#configuration-workflow). For a user-computer configuration controlled from dot, keep that file and server there and resolve remote-config-bridge via the [remote recipe](remote-configuration.md).
+Copy the code archive to the selected service host, extract it, verify and pin its runtime root, then follow the [configuration workflow](#configuration-workflow). Dot hosting requires a dot-local configuration after any supported secure user handoff. Only explicitly requested computer hosting keeps the server there and uses the bridge [recipe](remote-configuration.md); a source path does not choose that route.
 
 In a repository checkout, `setup` locates the root workspace automatically. It also accepts pnpm install options, for example `setup --offline` when the needed packages are already cached. Copy the generated archive when moving only this skill; copying its raw source folder alone does not include the repository's shared lockfile.
 

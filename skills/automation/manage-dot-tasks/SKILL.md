@@ -22,7 +22,7 @@ Use `--store PATH` before the command to select a store; otherwise `DOT_TASKS_HO
 
 ## Install and start as one task-management experience
 
-For installation, startup, or resume, read and follow [integrated startup](references/startup.md). This skill is the single workflow entry point: it carries procedural defaults for routing, dependency setup, verified mapping reuse, scoped agent grants, native cards, source discovery and the durable active loop. Users state what tasks/chats they want, rather than repeating agent instructions. Installation alone does not authorize messaging or start a receiver. Reuse existing bindings and scopes; ask only for missing intent, identity or authorization.
+For installation, startup, or resume, read and follow [integrated startup](references/startup.md). This skill is the single workflow entry point: it carries procedural defaults for routing, dependency setup, verified mapping reuse, scoped agent grants, native cards, source discovery and the durable active loop. Select the Feishu service host from the user's intent, independently of the configuration source and task executor. Dot hosting uses a dot-local configuration and direct adapter; only explicitly selected computer hosting uses Remote Config Bridge. An unavailable secure credential handoff blocks that service route, never selects another host. Verify the requested revision and pin the actual runtime roots before using an installed copy. Installation alone does not authorize messaging or start a receiver. Reuse existing bindings and scopes; ask only for missing intent, identity or authorization.
 
 ## Natural-language Feishu intake
 

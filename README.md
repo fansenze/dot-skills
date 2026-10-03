@@ -15,22 +15,24 @@ app_id: "YOUR_APP_ID"
 app_secret: "YOUR_APP_SECRET"
 ```
 
-Both values come from your app's **Credentials & Basic Info** in the [Feishu developer console](https://open.feishu.cn/app): `app_id` identifies the app; `app_secret` authenticates it. Keep the quotes. These are the only required fields; `brand` defaults to `feishu` (add `brand: "lark"` for Lark). Chat IDs are resolved separately and do not belong in this file. Keep the file and its secret on your computer; give dot only the path, never paste or upload the secret.
+Both values come from your app's **Credentials & Basic Info** in the [Feishu developer console](https://open.feishu.cn/app): `app_id` identifies the app; `app_secret` authenticates it. Keep the quotes. These are the only required fields; `brand` defaults to `feishu` (add `brand: "lark"` for Lark). Chat IDs are resolved separately and do not belong in this file. Keep secrets out of chat and ordinary Library uploads. A service running on dot needs a configuration already available there or a supported secure handoff completed by the user; this skill cannot waive platform credential restrictions. If no supported handoff is available, dot reports that blocker before starting the service.
 
 For a new app, enable its bot capability and follow [Feishu app settings](skills/messaging/feishu-message-server/references/operations.md#feishu-app-settings) for message permissions and long-connection events. Dot can help finish connection setup during startup.
 
-### 2. Give dot the path and start
+### 2. Choose where the service runs and give dot the path
 
-Connect the computer that holds the file to dot. Replace the quoted path below with your file's **absolute path** (for example, `/Users/you/.config/dot/feishu.yml`, not `~/.config/dot/feishu.yml`), then copy the prompt into dot. If you have several computers, replace “my connected computer” with its name.
+This prompt selects **dot for both the Feishu service and task management**. Your Mac supplies the configuration source; its file path does not select the service host. Replace the quoted path with your file's **absolute path** (for example, `/Users/you/.config/dot/feishu.yml`, not `~/.config/dot/feishu.yml`) and name the source computer when needed. If the configuration is already on dot, give that dot-local path instead; no local worker or transfer is needed.
 
 ```text
-Use the Feishu config at "/absolute/path/to/feishu.yml" on my connected computer.
-Install and start Manage Dot Tasks with Feishu from https://github.com/fansenze/dot-skills.
+My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer.
+Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills.
 In my private chat with the bot, let me manage my existing and new dot/Codex tasks
 through natural language. Send an initial overview and meaningful progress updates there.
 ```
 
-Dot handles installation and reuses a matching setup. On first use, it may ask you to send the bot one private message then checks that the sender and chat belong to you before enabling task intake or sending task information. An already verified chat is reused without another introductory message.
+Dot checks the requested version and existing installation, then reuses a matching setup on the selected host. A missing secure configuration handoff blocks the dot service; it never silently starts a Mac service instead. On first use, dot may ask you to send the bot one private message, then checks sender/chat ownership before enabling intake or sending task information. An already verified chat is reused without another introductory message.
+
+If you explicitly want **the Feishu service on your connected computer**, say so and name that computer. Dot then uses Remote Config Bridge, keeping the configuration and transport there while task management remains on dot. If service location is missing or ambiguous, dot asks before starting either route.
 
 ### 3. Manage tasks in Feishu
 
@@ -43,14 +45,14 @@ In my private chat with the bot, accept ordinary messages to create and continue
 and send their progress and results there. Include only tasks created through this chat.
 ```
 
-To resume, supply the same path and keep the existing scope:
+To resume, keep the selected service host, verified configuration and existing scope:
 
 ```text
-Resume Manage Dot Tasks with Feishu using the config at "/absolute/path/to/feishu.yml"
-on my connected computer. Reuse the existing verified private chat and task scope.
+Resume Manage Dot Tasks and the Feishu service on dot using the existing verified
+dot-local configuration, installation, private chat and task scope.
 ```
 
-You can add “Run my tasks on dot” or “Use my connected Mac” to choose where task work runs; the config's location does not choose it for you. Task actions still need their usual permissions. For task management without messaging, ask “Install and initialize Manage Dot Tasks locally, without Feishu.”
+Task execution location is a separate choice from the Feishu service host and configuration source. State any different task executor explicitly; task actions still need their usual permissions. For task management without messaging, ask “Install and initialize Manage Dot Tasks locally, without Feishu.”
 
 ## Install an individual skill
 
@@ -63,7 +65,7 @@ CLI requirements: Node.js 22.18+. Feishu additionally needs pnpm 11.27.0 and its
 | Category | Skill | Use it to |
 | --- | --- | --- |
 | Messaging | [Feishu Message Server](skills/messaging/feishu-message-server/SKILL.md) | Receive private messages and group mentions; send or reply with explicit text, Markdown, or cards. |
-| Messaging | [Remote Config Bridge](skills/messaging/remote-config-bridge/SKILL.md) | Keep configuration/credentials on the selected computer; bridge authorized operations and receipts through a reused local task. |
+| Messaging | [Remote Config Bridge](skills/messaging/remote-config-bridge/SKILL.md) | Bridge authorized operations when the user selects a connected computer to host Feishu; keep its credentials and transport there. |
 | Automation | [Manage Dot Tasks](skills/automation/manage-dot-tasks/SKILL.md) | Manage tasks, scheduling, authorized notifications/natural-language intake, and acceptance through one CLI and Markdown UI. |
 | Files | [Transfer Local Files to dot](skills/files/transfer-local-files-to-dot/SKILL.md) | Copy selected local files through ChatGPT Library and verify exact bytes on dot. |
 
@@ -73,7 +75,7 @@ Repository guidance is in [AGENTS.md](AGENTS.md). Runtime protocols and recovery
 
 ## Validate and package
 
-From the repository root:
+First [verify the runtime tools](skills/messaging/feishu-message-server/references/remote-configuration.md#verify-runtime-tools): put the selected pnpm 11.27.0 bin directory first on `PATH` and verify child-process lookup, not only a direct `pnpm.cjs` invocation. Preserve that environment across tool calls. Then, from the repository root:
 
 ```bash
 pnpm install --frozen-lockfile

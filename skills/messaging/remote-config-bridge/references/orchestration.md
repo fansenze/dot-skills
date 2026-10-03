@@ -4,21 +4,22 @@ This skill transports remote operation batches and results. It does not transfer
 
 The agent performs the steps below. These are operational recipes, not an SDK or a new platform API. Inspect the currently exposed environment/task tool schemas and use actual returned IDs. `cloud_threads.create`, `cloud_threads.send_message` and `cloud_threads.read` are calls by the active dot; Node never invokes them. If they are unavailable, report remote orchestration unavailable and retain local task work. Do not substitute a cloud process that tries to open the user's computer path.
 
-## Route once and reuse
+## Select computer hosting explicitly, then route once
 
-| Configuration ownership | Execution route |
+| User-selected service host | Execution route |
 | --- | --- |
-| User computer, orchestrated by dot in another environment | Invoke this bridge; execute all configuration and Feishu commands in one verified task on that computer |
-| Configuration already in the same environment as the invoking agent | Use the Feishu local CLI directly in that environment |
-| Computer/environment ownership unresolved | Resolve the selected computer; a path string alone does not identify an environment |
+| Connected computer, explicitly selected while dot manages tasks | Invoke this bridge; execute Feishu commands in one verified task on that host |
+| Dot, with a verified dot-local configuration | Use the Feishu CLI and direct adapter on dot; no local bridge worker |
+| Dot, but configuration exists only on a connected computer | Require a supported secure user handoff; report a blocker if unavailable, never infer computer hosting |
+| Service host unresolved | Ask which host should run Feishu before startup; a source path alone does not choose it |
 
 The Feishu skill delegates remote orchestration here once. The local task invokes Feishu's CLI, not the Feishu setup skill, so there is no recursive delegation. The bridge never calls its own skill through the worker. A request for configuration does not authorize sending, recipient discovery beyond existing permissions, or a notification subscription. Carry existing exact startup, content, destination and task-scope authorization forward; ask only for missing information. Do not repeat a permission prompt or scan unrelated files to classify secrets.
 
 One-prompt example, assuming the referenced computer, configuration and recipient are already selected:
 
 ```text
-Connect my existing Feishu configuration on the selected computer using
-remote-config-bridge. Keep the configuration and credentials there. Reuse the
+Host the Feishu service on my selected connected computer and keep task management
+on dot using remote-config-bridge. Keep configuration and credentials there. Reuse the
 matching local task and receiver; start the receiver if it is not running.
 Connect Manage Dot Tasks on dot to this bridge. Send the already-authorized
 meaningful task updates only to my previously verified private chat, within
@@ -32,7 +33,7 @@ For configuration-only requests, perform check/identity/capabilities and binding
 ## Bootstrap on the selected computer
 
 1. Dot discovers the authorized computer using actual available environment tools. Inspect the prior verified child task ID and binding when present; use `cloud_threads.read` to confirm its selected environment and current state. Reuse a matching task/store. Otherwise call `cloud_threads.create` for that actual environment with the bounded setup instruction below. Retain its returned task ID; never invent one or create a task per message.
-2. The selected local task locates the complete installed bridge and Feishu packages. Their repository paths are `skills/messaging/remote-config-bridge` and `skills/messaging/feishu-message-server`; a combined archive contains those skill directories as siblings. Standalone users resolve the complete companion from the installed skill catalog or the [repository](https://github.com/fansenze/dot-skills). If the catalog is incomplete, inspect relevant `.agents/skills` in the authorized repository. Keep scripts/references/tests together. Install Feishu dependencies locally only when missing; the bridge requires none.
+2. The selected local task locates the complete bridge and Feishu packages, verifies the requested revision or trusted export manifest, and records their absolute runtime roots. An old installed copy with the same name is not automatically current. Their repository paths are `skills/messaging/remote-config-bridge` and `skills/messaging/feishu-message-server`; a combined archive contains them as siblings. Standalone users resolve the companion from the installed catalog or the [repository](https://github.com/fansenze/dot-skills). If the catalog is incomplete, inspect relevant `.agents/skills` in the authorized repository. Keep scripts/references/tests together and use the same verified roots for every command. Install Feishu dependencies locally only when missing; the bridge requires none.
 3. Reuse the exact selected configuration and receiver-state paths on that computer. In the local task run `check`, `identity` and `capabilities` below. Do not call `prepare`/`init` for an already usable file. If configuration is incomplete, report only missing key names and let the user complete it on that computer; do not request its secret in dot chat. For an explicitly requested local preparation, use Feishu's `prepare` locally and preserve that runtime file's needed lifetime.
 4. Require protocol 1 with text/Markdown/card, send, reply, receive and durable cursor support before using this adapter. Its declared capabilities describe that verified server contract, not live connectivity. Confirm the selected app ID and brand. Compute the actual server entry-point hash locally. Keep the entire reviewed installation/dependencies trusted; this hash does not cover imports.
 5. Write the private local binding outside reusable code, initialize/reuse the local store, and return only the public binding plus concise readiness/evidence references. The local configuration path is not part of the public binding. Do not return configuration contents, raw stderr, environment dumps or secrets.

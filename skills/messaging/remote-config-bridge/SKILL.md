@@ -1,6 +1,6 @@
 ---
 name: remote-config-bridge
-description: Bridge authorized task notifications and bounded inbox pages between active dot and a reused local task, keeping Feishu credentials on the user's computer. Use for remote configuration connections, durable batch transport, recovery and message-server integration.
+description: Bridge authorized task notifications and bounded inbox pages between active dot and a reused local task when the user explicitly selects computer-hosted Feishu. Keep credentials and transport on that host. Use for durable batch transport, recovery and message-server integration, not to infer service location from a configuration path.
 ---
 
 # Remote Config Bridge
@@ -11,13 +11,13 @@ Use Node.js 22.18+ only. Keep Feishu configuration and credentials on the select
 
 This is a remote operation/batch bridge, not arbitrary file-byte transfer. It does not replace upload/download tools. Keep selected configurations and credentials on their original computer; reviewed code distribution may still use supported file transfer. There is no general file read/export operation.
 
-When Feishu configuration belongs to a user computer and dot orchestrates elsewhere, route here once and follow [agent orchestration](references/orchestration.md). If configuration and the invoking agent are in the same environment, the Feishu CLI may remain direct. The reused local task invokes that CLI, never either setup skill recursively. Reuse exact existing authorization; a configuration path alone does not authorize a message.
+Route here only when the user explicitly selects a connected computer to host Feishu while dot orchestrates elsewhere; follow [agent orchestration](references/orchestration.md) once. Configuration source location alone does not select this route. A request for service on dot stays direct with a dot-local configuration; if its secure user handoff is unavailable, report that blocker instead of starting on the computer. The reused local task invokes the pinned CLI, never either setup skill recursively. Reuse exact existing authorization; a configuration path alone does not authorize hosting or a message.
 
 ## Establish one connection
 
 Read [the protocol and commands](references/protocol.md) and the [executable orchestration example](references/orchestration-example.json). Discover the user's authorized connected computer using the actual environment tools. Create one local child task through `cloud_threads.create`, then reuse that verified task ID with `send_message` and `read`. Reuse an existing matching task and worker store when available. Node scripts never call or emulate platform APIs.
 
-Ask the local task to use the actual installed Feishu `scripts/server.mjs`, its existing configuration path, and its persistent receiver state directory. The worker's private local binding pins those paths, app ID, brand and the server entry-point SHA-256. Never return config contents, environment dumps, tokens or secrets. The public cloud binding contains only remote ID, app ID, brand and code hash. These identifiers are integrity pins, not credentials or recipient authorization.
+Compare installed code with the requested repository revision or trusted export manifest before reuse. Pin the absolute local/cloud bridge roots and actual Feishu `scripts/server.mjs`, plus the selected host's configuration and receiver-state paths. Do not execute a stale installed copy merely because its skill/package name matches. The worker's private local binding pins those paths, app ID, brand and the server entry-point SHA-256. Preserve worker state and unresolved receipts during a reviewed code/binding transition. Never return config contents, environment dumps, tokens or secrets. The public cloud binding contains only remote ID, app ID, brand and code hash. These identifiers are integrity pins, not credentials or recipient authorization.
 
 Initialize local and cloud stores separately outside this skill. Store the verified child task ID in the cloud store. The init commands preserve existing matching stores and reject silent rebinding. Inspect Feishu capabilities locally before selecting formats; this adapter requires protocol 1 with text/markdown/card, send, receive, reply and durable cursor support. Installation does not start the listener or send a test message. Start/reuse it only when the user has authorized startup; check actual lifecycle evidence separately.
 

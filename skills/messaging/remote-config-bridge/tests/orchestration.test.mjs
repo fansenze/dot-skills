@@ -49,6 +49,7 @@ function executeStep(f,step) {
 
 test('documented two-environment setup reuses bindings and exact task batch/receipt replay has one effect',t=>{
   const f=fixture(t),before=fs.readFileSync(f.config);assert.equal(example.scope,'remote-operations-only');
+  assert.equal(example.service_host,'explicitly-selected-computer');
   assert.equal(example.task_selection.if_missing.tool,'cloud_threads.create');
   example.setup.forEach(step=>executeStep(f,step));
   assert.ok(!fs.existsSync(f.effects),'Configuration alone must not send');
