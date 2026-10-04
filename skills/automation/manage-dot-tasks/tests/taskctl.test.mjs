@@ -9,6 +9,7 @@ import { spawnSync, spawn } from 'node:child_process';
 import { crc32 } from 'node:zlib';
 import { package_skill } from '../scripts/package.mjs';
 import * as m from '../scripts/taskctl.mjs';
+import {uiTime} from '../scripts/presentation.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../scripts/taskctl.mjs', import.meta.url));
 const FIXTURE = fileURLToPath(new URL('./fixtures/python-schema1', import.meta.url));
@@ -356,7 +357,7 @@ test('later activity preserves the real completion timestamp', t => {
   task.updated_at = new Date(m.timestamp(completedAt).getTime() + 7200000).toISOString();
   assert.equal(m.visible_tasks([task], new Date(m.timestamp(task.updated_at).getTime() + 599000)).length, 1);
   const status = m.status_cell(task);
-  assert.equal(status, '✅ ' + m.display_time(completedAt)); assert.ok(!status.includes(m.display_time(task.updated_at)));
+  assert.equal(status, '✅ Succeeded · ' + uiTime(completedAt)); assert.ok(!status.includes(uiTime(task.updated_at)));
 });
 
 test('unfinished and failed tasks stay visible regardless of age', t => {
@@ -375,9 +376,9 @@ test('three-column Markdown escapes pipes, multiline content and HTML', t => {
 });
 
 test('queued uses clock and active states have no completion time', t => {
-  const l = ledger(t), task = l.register({ status: 'queued' }); assert.equal(m.status_cell(task), '🕒');
-  task.status = 'executing'; assert.equal(m.status_cell(task), '🚧');
-  task.status = 'awaiting_verification'; assert.equal(m.status_cell(task), '🚧');
+  const l = ledger(t), task = l.register({ status: 'queued' }); assert.equal(m.status_cell(task), '🕒 Pending');
+  task.status = 'executing'; assert.equal(m.status_cell(task), '🚧 In progress');
+  task.status = 'awaiting_verification'; assert.equal(m.status_cell(task), '🚧 In progress');
 });
 
 test('short summary does not remove the full current blocker from detail', t => {
@@ -575,7 +576,7 @@ test('explicit null text fields are invalid even when summary is optional', t =>
   writeTask(l.root, original); assert.equal(l.call('doctor').ok, true);
 });
 
-test('English and Chinese render bytes match frozen Python views', () => {
+test('English and Chinese compact views preserve schema-1 task semantics', () => {
   const task = json(path.join(FIXTURE, 'tasks/task-legacy/task.json'));
   const config = json(path.join(FIXTURE, 'store.json'));
   const expected = json(fileURLToPath(new URL('./fixtures/python-render-expected.json', import.meta.url)));

@@ -237,7 +237,8 @@ async function sendData(client, data, {receiveId, receiveIdType = 'chat_id', mes
       ? await client.im.message.reply({path: {message_id: messageId}, data: {...data, reply_in_thread: replyInThread}})
       : await client.im.message.create({params: {receive_id_type: receiveIdType}, data: {...data, receive_id: receiveId}});
     if (response?.code === 0 && typeof response?.data?.message_id === 'string' && response.data.message_id) {
-      return {ok: true, ...base, message_id: response.data.message_id};
+      const context = Object.fromEntries(['parent_id','root_id','thread_id'].filter(k=>typeof response.data[k]==='string'&&/^[^\s\x00-\x1f\x7f]{1,256}$/u.test(response.data[k])).map(k=>[k,response.data[k]]));
+      return {ok: true, ...base, message_id: response.data.message_id, ...context};
     }
     const apiError = Number.isSafeInteger(response?.code) && response.code !== 0;
     return {ok: false, ...base, status: apiError ? 'api_error' : 'delivery_unknown',

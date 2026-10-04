@@ -1,7 +1,7 @@
 interface:
   display_name: "Task Management"
-  short_description: "Conversational intake, scheduling, and verified outcomes"
-  default_prompt: "Use $manage-dot-tasks to manage my tasks. For setup or resume, follow its integrated startup workflow and ask only for missing scope or identity."
+  short_description: "Text/post intake, threaded replies, and verified outcomes"
+  default_prompt: "Use $manage-dot-tasks to manage my tasks with scoped receipt replies and completion-only notifications. For setup or resume, follow its integrated startup workflow and ask only for missing scope or identity."
   icon_small: "assets/icon.svg"
   icon_large: "assets/icon.svg"
 policy:

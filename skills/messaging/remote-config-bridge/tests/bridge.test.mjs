@@ -62,3 +62,15 @@ test('bridge adapter preserves optional provider context through durable receipt
    }
  }
 });
+
+test('reply thread option survives job replay and cannot be supplied to a send operation',async t=>{
+ const {cloud,worker,dir,local}=await fixture(t),input=send('thread fixture','thread-key');
+ input.operation='reply';input.payload.reply_to='original-fixture';input.payload.reply_in_thread=true;
+ const log=path.join(dir,'argv.json');fs.writeFileSync(local.server,`import fs from 'node:fs';fs.writeFileSync(${JSON.stringify(log)},JSON.stringify(process.argv.slice(2)));const a=process.argv.slice(2);console.log(JSON.stringify({ok:true,message_id:'thread-message',idempotency_key:a[a.indexOf('--idempotency-key')+1]}));`);
+ const ld=worker.read();ld.binding.server_sha256=fileHash(local.server);worker.save(ld);const cd=cloud.read();cd.binding.server_sha256=ld.binding.server_sha256;cloud.save(cd);
+ await enqueue(cloud,input);const batch=await exportBatch(cloud),receipt=await processBatch(worker,batch);
+ assert.equal(receipt.receipts[0].result.status,'api_accepted');assert.ok(JSON.parse(fs.readFileSync(log)).includes('--reply-in-thread'));
+ assert.deepEqual(await processBatch(worker,batch,()=>assert.fail('must not resend')),receipt);
+ await assert.rejects(enqueue(cloud,{...input,payload:{...input.payload,reply_in_thread:false}}),/mismatch/);
+ const invalid=send('invalid','other-key');invalid.payload.reply_in_thread=true;await assert.rejects(enqueue(cloud,invalid));
+});

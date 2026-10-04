@@ -183,3 +183,7 @@ In a repository checkout, `setup` locates the root workspace automatically. It a
 - [ProxyAgent](https://github.com/TooTallNate/proxy-agents/tree/main/packages/proxy-agent)
 - [pnpm workspaces and shared lockfiles](https://pnpm.io/workspaces)
 - [pnpm install](https://pnpm.io/cli/install)
+
+## Rich-text and thread workflow
+
+Read [rich text and thread replies](rich-text-and-threads.md) for the three official receive/post/reply references, SDK-verified request fields, projection limits, thread flag and permission/dedup boundaries. The receiver only stores input; Manage Dot Tasks owns authorized acknowledgements and completion-only notifications.

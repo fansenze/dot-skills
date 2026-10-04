@@ -1,5 +1,6 @@
+import {taskDocument as document} from './presentation.mjs';
 /** Transactional notifications and explicitly authorized agent/command intake. */
-import {createMessageInbox, agentMessage, grantCovers, messageText, messageEnvelope, validateMessages} from './message-inbox.mjs';
+import {createMessageInbox, agentMessage, grantCovers, messageText, messageEnvelope, validateMessages, validateContextGrants, requestFailureDocument} from './message-inbox.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -8,14 +9,14 @@ import { digest, loadConnector, sendResult, bounded, requireText, ConnectorError
 export const INTEGRATION_OPTIONS = {
   connect: ['id', 'module', 'settings-file'], connections: [], disconnect: [],
   watch: ['id', 'connector', 'account', 'destination', 'destination-type', 'format', 'events', 'tasks', 'language', 'initial'],
-  unwatch: [], 'allow-inbound': ['id', 'connector', 'account', 'tenant', 'sender', 'destination', 'commands', 'tasks', 'since', 'format', 'reply-mode', 'mode', 'allow-new', 'updates'],
-  'message-next': ['consumer', 'limit', 'lease-ms'], 'message-renew': ['token', 'lease-ms'], 'message-record': ['token', 'decision-file'], 'message-ack': ['token'],
-  'deny-inbound': [], outbox: ['all'], inbound: [],
+  unwatch: [], 'allow-inbound': ['id', 'connector', 'account', 'tenant', 'sender', 'destination', 'commands', 'tasks', 'since', 'format', 'reply-mode', 'language', 'context-from', 'mode', 'allow-new', 'updates'],
+  'message-next': ['consumer', 'limit', 'lease-ms'], 'message-renew': ['token', 'lease-ms'], 'message-record': ['token', 'decision-file'], 'message-ack': ['token'], 'message-fail': ['token', 'stage', 'reason'],
+  'deny-inbound': [], 'request-failure': ['stage', 'reason', 'evidence'], outbox: ['all'], inbound: [],
   ingest: ['connector', 'limit'], deliver: ['consumer', 'limit', 'lease-ms'],
   'retry-notice': ['reason'], 'resolve-notice': ['status', 'message-id', 'evidence'],
   start: ['consumer', 'timeout-ms', 'lease-ms', 'limit'],
 };
-export const INTEGRATION_IDS = ['disconnect', 'unwatch', 'deny-inbound', 'retry-notice', 'resolve-notice', 'message-renew', 'message-record', 'message-ack'];
+export const INTEGRATION_IDS = ['disconnect', 'unwatch', 'deny-inbound', 'retry-notice', 'resolve-notice', 'message-renew', 'message-record', 'message-ack', 'message-fail', 'request-failure'];
 const EVENTS = ['registered', 'progress', 'blocked', 'failed', 'completed', 'verification', 'result', 'execution'];
 const FINAL = new Set(['api_accepted', 'api_error', 'delivery_unknown', 'dead', 'cancelled']);
 const STATES = ['pending', 'claimed', 'sending', 'recorded', ...FINAL];
@@ -39,16 +40,6 @@ const projection = task => {
     execution: {state: task.execution.state, source: task.execution.source, run_id: task.execution.run_id},
     progress: task.events.filter(e => ['progress', 'decision', 'blocker'].includes(e.kind)).at(-1)?.text ?? ''};
 };
-function document(tasks, language = 'en') {
-  const zh = language === 'zh';
-  return {title: zh ? '任务列表' : 'Tasks', updated_at: stamp(), columns: zh ? ['标题', '状态', '信息描述'] : ['Title', 'Status', 'Summary'],
-    rows: tasks.map(t => {
-      const p = projection(t), failures = p.checks.filter(c => c.outcome === 'fail').map(c => c.name);
-      return [t.title, t.status === 'completed' ? '✅ ' + t.completion.at : ['queued', 'cancelled'].includes(t.status) ? '🕒 ' + t.status : '🚧 ' + t.status,
-        [t.completion?.summary ?? (t.summary || p.progress || t.next_action), t.blocker, ...failures].filter(Boolean).join('; ')];
-    }), details: tasks.length === 1 ? [tasks[0].goal, tasks[0].blocker, ...projection(tasks[0]).checks.map(c => `${c.outcome}: ${c.name} · ${c.evidence}`),
-      ...tasks[0].results.map(r => `${r.label}: ${r.url}`)].filter(Boolean) : []};
-}
 export function readIntegration(store) {
   const file = store.path('integration.json');
   if (!fs.existsSync(file)) return empty();
@@ -71,11 +62,13 @@ export function readIntegration(store) {
     if (['claimed', 'sending'].includes(n.state) && !n.lease) throw new ConnectorError('Notification lease missing');
     const c = data.connections.find(c => c.id === n.route.connector_id), p = policies.find(p => p.id === n.route.policy_id);
     if (!p || p.connector !== c.id || digest(n.route) !== digest(routeFor(c, p)) || n.id !== 'notice-' + digest([n.event_id, n.route]).slice(0, 40)) throw new ConnectorError('Notification route integrity failed');
+    if (n.reply_in_thread !== undefined && (typeof n.reply_in_thread !== 'boolean' || !n.reply_to)) throw new ConnectorError('Invalid reply options');
     if (n.attempts < 0 || !Number.isFinite(Date.parse(n.available_at)) || (n.lease && !Number.isFinite(Date.parse(n.lease.until)))) throw new ConnectorError('Invalid notification recovery state');
   }
   validateMessages(data);
   return data;
 }
+export const requestFailures = store => readIntegration(store).inbox.filter(r=>r.failure).map(r=>({id:r.id,...r.failure}));
 export function decorateNotifications(store, tasks, language = 'en') {
   const data = readIntegration(store), zh = language === 'zh';
   return tasks.map(task => {
@@ -92,11 +85,11 @@ export function decorateNotifications(store, tasks, language = 'en') {
   });
 }
 const writes = data => ({'integration.json': encode(data)});
-function enqueue(data, eventId, route, doc, taskId = null, replyTo = null) {
+function enqueue(data, eventId, route, doc, taskId = null, replyTo = null, replyInThread = false) {
   const noticeId = 'notice-' + digest([eventId, route]).slice(0, 40);
   if (data.outbox.some(n => n.id === noticeId)) return;
   data.outbox.push({id: noticeId, key: noticeId, event_id: eventId, task_id: taskId, route: structuredClone(route),
-    document: doc, reply_to: replyTo, state: 'pending', attempts: 0, max_attempts: 3, available_at: stamp(),
+    document: doc, reply_to: replyTo, ...(replyInThread ? {reply_in_thread:true} : {}), state: 'pending', attempts: 0, max_attempts: 3, available_at: stamp(),
     lease: null, intent: null, receipt: null, history: [], created_at: stamp()});
 }
 const routeFor = (connection, policy) => ({connector_id: connection.id, binding: connection.binding, policy_id: policy.id,
@@ -117,22 +110,27 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
   for (const watch of data.watches) {
     const connection = data.connections.find(c => c.id === watch.connector && c.enabled);
     if (!connection || !watch.enabled || !covers(watch.tasks, task.id) || !watch.events.some(k => kinds.includes(k))) continue;
-    enqueue(data, `task:${task.id}:${task.revision}`, routeFor(connection, watch), document([task], watch.language), task.id);
+    const associated = data.inbox.filter(r => agentMessage(r) && r.binding === connection.binding && r.task_id === task.id && ['create','continue'].includes(r.decision?.decision)).findLast(r => {
+      const g = data.grants.find(g => g.id === r.grant_id);
+      return g?.enabled && g.updates && g.reply_mode === 'reply' && g.account === watch.account && g.destination === watch.destination && (watch.destination_type ?? 'chat_id') === 'chat_id' && grantCovers(data,g,task.id);
+    });
+    const replyTo = connection.capabilities.reply && associated ? associated.envelope.message_id : null;
+    enqueue(data, `task:${task.id}:${task.revision}`, routeFor(connection, watch), document([task], watch.language), task.id, replyTo, Boolean(replyTo));
     watchedRoutes.push(routeFor(connection, watch));
     changed = true;
   }
   // Progress follows an explicit updates grant and an agent-recorded association.
   // One latest associated incoming message per immutable grant is the reply anchor.
-  if (previous) for (const grant of data.grants.filter(g => g.mode === 'agent' && g.enabled && g.updates)) {
+  if (previous && task.status === 'completed' && previous.status !== 'completed') for (const grant of data.grants.filter(g => g.mode === 'agent' && g.enabled && g.updates)) {
     const connection = data.connections.find(c => c.id === grant.connector && c.enabled);
-    const anchor = data.inbox.filter(r => agentMessage(r) && r.grant_id === grant.id && r.task_id === task.id && r.decision && ['create','continue'].includes(r.decision.decision)).at(-1);
+    const anchor = data.inbox.filter(r => agentMessage(r) && r.grant_id === grant.id && r.binding === connection?.binding && r.task_id === task.id && r.decision && ['create','continue'].includes(r.decision.decision)).at(-1);
     if (!connection || !anchor || !grantCovers(data,grant,task.id)) continue;
     const route = routeFor(connection, grant);
     // A watch is the primary task-update route. Keep decision replies separate.
     if (watchedRoutes.some(w => w.connector_id === route.connector_id && w.binding === route.binding &&
       w.account_id === route.account_id && w.destination.id === route.destination.id &&
       w.destination.type === route.destination.type && w.format === route.format)) continue;
-    enqueue(data, 'task:'+task.id+':'+task.revision, route, document([task]), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null);
+    enqueue(data, 'task:'+task.id+':'+task.revision, route, document([task], grant.language ?? 'zh'), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null, grant.reply_mode === 'reply');
     changed = true;
   }
   return changed ? writes(data) : {};
@@ -173,7 +171,8 @@ export function createIntegration({store, scheduler, makeTask}) {
         changed = true;
       }
       let selected;
-      for (const n of data.outbox) {
+      // Receipt acknowledgements precede task snapshots in each bounded delivery batch.
+      for (const n of [...data.outbox].sort((a,b)=>Number(!a.event_id.startsWith('received:'))-Number(!b.event_id.startsWith('received:')))) {
         if (n.state !== 'pending' || Date.parse(n.available_at) > Date.now()) continue;
         if (!policyActive(data, n)) { n.state = 'cancelled'; changed = true; continue; }
         n.state = 'claimed'; n.attempts++; n.lease = {consumer, token: crypto.randomUUID(), until: new Date(Date.now() + leaseMs).toISOString()};
@@ -227,7 +226,7 @@ export function createIntegration({store, scheduler, makeTask}) {
       try {
         result = await bounded(signal => adapter[intent.reply_to ? 'reply' : 'send']({account_id: intent.route.account_id,
           destination: intent.route.destination, format: intent.route.format, body: intent.wire_body,
-          reply_to: intent.reply_to, idempotency_key: intent.key}, {signal}));
+          reply_to: intent.reply_to, ...(intent.reply_in_thread !== undefined ? {reply_in_thread:intent.reply_in_thread} : {}), idempotency_key: intent.key}, {signal}));
       } catch { result = null; }
       await record(n.id, n.lease.token, result); sent.push(await ack(n.id, n.lease.token));
     }
@@ -277,7 +276,7 @@ export function createIntegration({store, scheduler, makeTask}) {
         const command = parseCommand(e), received = Date.parse(e.received_at), occurred = e.occurred_at === undefined ? received : Date.parse(e.occurred_at);
         const grant = data.grants.find(g => g.enabled && g.connector === snapshot.c.id && g.account === e.account_id && g.tenant === e.tenant_id &&
           g.tenant === e.sender_tenant_id && g.sender === e.sender_id && g.destination === e.destination_id && Number.isFinite(received) && Number.isFinite(occurred) && Math.min(received, occurred) >= Date.parse(g.since) &&
-          ((g.mode === 'agent' && messageText(e)) || (g.mode !== 'agent' && command && g.commands.includes(command.verb) && (!command.task_id || covers(g.tasks, command.task_id)))));
+          ((g.mode === 'agent') || (g.mode !== 'agent' && command && g.commands.includes(command.verb) && (!command.task_id || covers(g.tasks, command.task_id)))));
         if (cp) cp.cursor = e.cursor; else data.checkpoints.push({id: snapshot.c.id, cursor: e.cursor});
         if (seen) { save(data); return; }
         const entry = {id: messageKey, event_key: eventKey, connector: snapshot.c.id, status: 'rejected', reason: 'not-authorized-or-not-a-command'};
@@ -285,13 +284,21 @@ export function createIntegration({store, scheduler, makeTask}) {
         const currentConnection = data.connections.find(c => c.id === snapshot.c.id);
         if (!grant || !currentConnection.enabled || currentConnection.binding !== snapshot.c.binding) { save(data); return; }
         if (grant.mode === 'agent') {
+          if(!messageText(e)){
+            const reason = !['text','post'].includes(e.type) ? '不支持此消息类型，请发送文本或含文字的富文本。' : '无法提取安全且完整的正文，请检查格式或发送不超过 8000 字符的文本。';
+            Object.assign(entry,{mode:'request_failure',grant_id:grant.id,binding:currentConnection.binding,envelope:messageEnvelope({...e,text:undefined,text_source:undefined,text_omitted:undefined}),status:'failed',reason:'content-unavailable',failure:{stage:'parse',reason,at:stamp()}});
+            enqueue(data,'failure:'+messageKey,routeFor(currentConnection,grant),requestFailureDocument(entry,grant.language),null,grant.reply_mode==='reply'?e.message_id:null,grant.reply_mode==='reply');
+            save(data);return;
+          }
           Object.assign(entry, {mode:'agent', grant_id:grant.id, binding:currentConnection.binding, envelope:messageEnvelope(e), status:'pending', reason:'awaiting-agent', lease:null, decision:null});
+          const zh = (grant.language ?? 'zh') === 'zh';
+          enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant), {title:zh?'收到':'Received',updated_at:stamp(),columns:[],rows:[],details:[zh?'已收到，正在排队处理。':'Received; your request is queued for review.']}, null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
           save(data); return;
         }
         if (command.task_id && !store.index().some(t => t.id === command.task_id)) { entry.reason = 'unknown-task'; save(data); return; }
         if (['list', 'show'].includes(command.verb)) {
           const tasks = command.task_id ? [store.get(command.task_id)] : store.all().filter(t => covers(grant.tasks, t.id));
-          enqueue(data, 'inbound:' + messageKey, routeFor(currentConnection, grant), document(tasks), command.task_id, grant.reply_mode === 'reply' ? e.message_id : null);
+          enqueue(data, 'inbound:' + messageKey, routeFor(currentConnection, grant), document(tasks, grant.language ?? 'zh', command.verb === 'show'), command.task_id, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
           entry.status = 'accepted'; entry.reason = 'ledger-response'; save(data); return;
         }
         const task = store.get(command.task_id);
@@ -332,7 +339,7 @@ export function createIntegration({store, scheduler, makeTask}) {
           catch { if (!gaps.includes(c.id)) gaps.push(c.id); }
         }
         notifications.push(...(await deliver({consumer, limit: args.limit ?? 10, lease_ms: args.lease_ms})).notifications);
-        const claimed = await messages.claim({consumer,limit:args.limit ?? 1,lease_ms:args.lease_ms});
+        const claimed = await messages.claim({consumer,limit:args.limit ?? 1,lease_ms:args.lease_ms,require_receipt_attempt:true});
         const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: claimed.messages.length ? 0 : Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
         if (claimed.messages.length || queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
           return {...queued, messages:claimed.messages, ingested, notifications, receive_gaps: gaps, readiness: connections.length ? 'configured-bindings; live transport not attested' : 'local-only; no server binding'};
@@ -362,8 +369,18 @@ export function createIntegration({store, scheduler, makeTask}) {
     return locked(() => {
       const data = readIntegration(store), cmd = args.command;
       if (cmd === 'connections') return data.connections;
+      if(cmd==='request-failure'){
+        const r=data.inbox.find(r=>r.id===args.id);
+        if(!r || r.mode || r.status!=='rejected' || r.task_id)throw new ConnectorError('Only a historical rejected request without a task may be annotated');
+        if(!['parse','create'].includes(args.stage))throw new ConnectorError('Failure stage must be parse or create');
+        requireText(args.reason,'failure reason',1000);requireText(args.evidence,'review evidence',1000);
+        if(scheduler.execute({command:'lookup',source:'connector-'+r.connector,source_ref:r.id}))throw new ConnectorError('Reconcile the existing task binding first');
+        const prior=r.failure;if(prior&&(prior.stage!==args.stage||prior.reason!==args.reason||prior.evidence!==args.evidence))throw new ConnectorError('Recorded failure is immutable');
+        r.failure=prior??{stage:args.stage,reason:args.reason,evidence:args.evidence,at:stamp()};save(data);
+        return {id:r.id,status:'failed',task_id:null,duplicate:Boolean(prior),notification:'none; historical annotation never replays or sends'};
+      }
       if (cmd === 'outbox') return data.outbox.filter(n => args.all || !['api_accepted', 'cancelled'].includes(n.state)).map(publicNotice);
-      if (cmd === 'inbound') return {checkpoints: data.checkpoints, outcomes: data.inbox.map(r => agentMessage(r) ? {id:r.id,event_key:r.event_key,connector:r.connector,grant_id:r.grant_id,mode:r.mode,status:r.status,reason:r.reason,task_id:r.task_id??null,summary:r.decision?.summary??null} : r)};
+      if (cmd === 'inbound') return {checkpoints: data.checkpoints, outcomes: data.inbox.map(r => agentMessage(r) ? {id:r.id,event_key:r.event_key,connector:r.connector,grant_id:r.grant_id,mode:r.mode,status:r.failure?'failed':r.status,reason:r.reason,task_id:r.task_id??null,summary:r.decision?.summary??null,...(r.failure?{failure:r.failure}:{})} : r.failure ? {id:r.id,connector:r.connector,grant_id:r.grant_id,status:'failed',task_id:null,failure:r.failure} : r)};
       if (['disconnect', 'unwatch', 'deny-inbound'].includes(cmd)) {
         const list = cmd === 'disconnect' ? data.connections : cmd === 'unwatch' ? data.watches : data.grants;
         const item = list.find(v => v.id === args.id); if (!item) throw new ConnectorError('Unknown binding');
@@ -380,17 +397,19 @@ export function createIntegration({store, scheduler, makeTask}) {
         let list;
         if (cmd === 'watch') {
           requireOutbound('send');
-          p.events = csv(args.events, EVENTS); p.language = args.language ?? 'en'; if (!['en', 'zh'].includes(p.language)) throw new ConnectorError('Invalid language'); list = data.watches;
+          p.events = csv(args.events ?? 'completed', EVENTS); p.language = args.language ?? 'zh'; if (!['en', 'zh'].includes(p.language)) throw new ConnectorError('Invalid language'); list = data.watches;
         } else {
           if (!c.capabilities.receive || !c.capabilities.durable_cursor) throw new ConnectorError('Durable inbox capability required');
           p.tenant = requireText(args.tenant, 'tenant'); p.sender = requireText(args.sender, 'sender');
           if (!['commands','agent'].includes(args.mode ?? 'commands')) throw new ConnectorError('Invalid inbound mode');
           if (args.mode === 'agent') {
+            if (args.language !== undefined) { if (!['en','zh'].includes(args.language)) throw new ConnectorError('Invalid language'); p.language = args.language; }
             p.mode = 'agent'; p.allow_new = Boolean(args.allow_new); p.updates = Boolean(args.updates);
             p.commands = csv(args.commands, ['query','create','continue']);
+            if (args.context_from !== undefined) { p.context_from=csv(args.context_from).map(id); validateContextGrants(data,p); }
             if (p.commands.includes('create') !== p.allow_new) throw new ConnectorError('Create scope and allow-new must be explicitly enabled together');
           } else {
-            if (args.allow_new || args.updates) throw new ConnectorError('Agent options require agent mode');
+            if (args.allow_new || args.updates || args.context_from !== undefined) throw new ConnectorError('Agent options require agent mode');
             p.commands = csv(args.commands, ['list','show','run','verify']);
           }
           p.reply_mode = args.reply_mode ?? 'reply';
@@ -404,7 +423,7 @@ export function createIntegration({store, scheduler, makeTask}) {
         if (prior && digest({...prior, enabled: true}) !== digest(p)) throw new ConnectorError('Policy identity is immutable; disable it and use a new ID to change scope');
         if (!prior && [...data.watches, ...data.grants].some(v => v.id === p.id)) throw new ConnectorError('Policy ID already exists');
         if (prior) prior.enabled = true; else list.push(p);
-        if (cmd === 'watch' && args.initial && !prior) enqueue(data, 'initial:' + p.id, routeFor(c, p), document(store.all().filter(t => covers(p.tasks, t.id)), p.language));
+        if (cmd === 'watch' && args.initial && !prior) enqueue(data, 'initial:' + p.id, routeFor(c, p), document(store.all().filter(t => covers(p.tasks, t.id)), p.language, false));
         save(data); return p;
       }
       const n = data.outbox.find(n => n.id === args.id); if (!n) throw new ConnectorError('Unknown notification');

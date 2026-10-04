@@ -1,3 +1,4 @@
+import {uiTime} from '../presentation.mjs';
 /** Calls the actual feishu-message-server CLI, never the platform directly. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,15 +38,18 @@ export function createConnector(settings) {
     const plain = text => ({tag: 'div', text: {tag: 'plain_text', content: String(text)}});
     const row = cells => ({tag: 'column_set', flex_mode: 'none', columns: cells.map((value, i) => ({
       tag: 'column', width: 'weighted', weight: i === 2 ? 3 : 2, elements: [plain(value)]}))});
-    return {config: {wide_screen_mode: true}, header: {title: {tag: 'plain_text', content: doc.title}},
-      elements: [{tag: 'note', elements: [{tag: 'plain_text', content: doc.updated_at}]}, row(doc.columns),
+    return {config: {wide_screen_mode: true}, header: {title: {tag: 'plain_text', content: doc.title+' · '+uiTime(doc.updated_at)}},
+      elements: [...(doc.columns.length && doc.rows.length ? [row(doc.columns)] : []),
         ...doc.rows.map(row), ...doc.details.map(plain)]};
   };
   async function send(message, signal, reply = false) {
     if (message.account_id !== settings.account_id) return {status: 'not_sent', idempotency_key: message.idempotency_key, retryable: false, error_code: 'binding-mismatch'};
     const args = [reply ? 'reply' : 'send', '--config', settings.config_ref, '--expected-app-id', settings.account_id, '--expected-brand', settings.brand,
       '--format', message.format, '--stdin', '--idempotency-key', message.idempotency_key];
-    if (reply) args.push('--message-id', requireText(message.reply_to, 'reply target'));
+    if (reply) {
+      args.push('--message-id', requireText(message.reply_to, 'reply target'));
+      if (message.reply_in_thread === true) args.push('--reply-in-thread');
+    }
     else args.push('--receive-id', requireText(message.destination.id, 'destination'), '--receive-id-type', message.destination.type);
     const result = await invoke(args, typeof message.body === 'string' ? message.body : JSON.stringify(message.body), signal);
     return {...result, status: result.ok === true && result.message_id ? 'api_accepted' : result.status,
@@ -65,7 +69,7 @@ export function createConnector(settings) {
         for (const key of m.bot_mention_keys ?? []) if (typeof text === 'string') text = text.replace(key, '').trim();
         return {cursor, ...replyContext(m), event_id: m.event_id, message_id: m.message_id, account_id: m.app_id, tenant_id: m.tenant_key,
           sender_tenant_id: m.sender_tenant_key, sender_id: m.sender_open_id, destination_id: m.chat_id,
-          type: m.message_type, received_at: new Date(m.received_at * 1000).toISOString(),
+          type: m.message_type, ...(m.text_source ? {text_source:m.text_source} : {}), ...(m.text_omitted ? {text_omitted:true} : {}), received_at: new Date(m.received_at * 1000).toISOString(),
           occurred_at: /^\d{13}$/.test(m.message_created_ms) ? new Date(Number(m.message_created_ms)).toISOString() : null, text};
       })};
     }

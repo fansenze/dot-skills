@@ -29,3 +29,16 @@ test('local adapter retains bounded provider reply context and multiline message
     }
   }
 });
+
+test('task reply forwards explicit thread option; old notices retain their original non-thread option',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'thread-forward-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const server=path.join(dir,'fixture.mjs');
+  fs.writeFileSync(server,`import fs from 'node:fs';const args=process.argv.slice(2);let body='';for await(const c of process.stdin)body+=c;fs.appendFileSync(${JSON.stringify(path.join(dir,'calls.jsonl'))},JSON.stringify({args,body})+'\\n');console.log(JSON.stringify({ok:true,message_id:'outgoing-fixture',idempotency_key:args[args.indexOf('--idempotency-key')+1]}));`);
+  const connector=createConnector({server,config_ref:path.join(dir,'unused'),state_dir:dir,account_id:'app-fixture',brand:'feishu'});
+  const message={account_id:'app-fixture',destination:{id:'chat-fixture',type:'chat_id'},format:'text',body:'已收到，正在排队处理。',reply_to:'message-fixture',idempotency_key:'stable-fixture'};
+  assert.equal((await connector.reply({...message,reply_in_thread:true})).status,'api_accepted');
+  await connector.reply({...message,reply_in_thread:true});await connector.reply(message);
+  const calls=fs.readFileSync(path.join(dir,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(calls[0],calls[1]);assert.ok(calls[0].args.includes('--reply-in-thread'));assert.ok(!calls[2].args.includes('--reply-in-thread'));
+  assert.equal(calls[0].args[0],'reply');assert.equal(calls[0].args[calls[0].args.indexOf('--message-id')+1],'message-fixture');
+});

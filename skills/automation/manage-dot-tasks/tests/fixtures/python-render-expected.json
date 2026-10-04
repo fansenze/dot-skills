@@ -1,11 +1,11 @@
 {
   "current": "2026-10-01T00:00:00+00:00",
   "en": {
-    "list": "# Tasks\n\n<sub>2026-10-01 00:00 UTC</sub>\n\n| Title | Status | Summary |\n| --- | --- | --- |\n| Legacy import 中文 | 🚧 | Verification failed: Signature |\n",
-    "detail": "# Legacy import 中文\n\n<sub>2026-01-01 00:10 UTC</sub>\n\n🚧\n\nVerification failed: Signature\n\nGoal: Preserve schema and current acceptance evidence\n\nNext: Resolve synthetic signature check\n\nLast checked: 2026-01-01 00:00 UTC, update needed\n\n## Steps\n\n- ✅ Imported completed step\n- 🕒 Pending old\\-schema step\n\n## Checks\n\n- ❌ Signature：Synthetic signature needs renewal\n"
+    "list": "# Tasks · <sub>2026-10-01 08:00:00</sub>\n\n| Title | Status | Summary |\n| --- | --- | --- |\n| Legacy import 中文 | 🚧 In progress | Verification failed: Signature |\n",
+    "detail": "# Legacy import 中文 · <sub>2026-01-01 08:10:00</sub>\n\nID: task-legacy\n\n🚧 In progress\n\nVerification failed: Signature\n\nGoal: Preserve schema and current acceptance evidence\n\nNext: Resolve synthetic signature check\n\nLast checked: 2026-01-01 08:00:30, update needed\n\n## Steps\n\n- ✅ Imported completed step\n- 🕒 Pending old\\-schema step\n\n## Checks\n\n- ❌ Signature：Synthetic signature needs renewal\n"
   },
   "zh": {
-    "list": "# 任务列表\n\n<sub>2026-10-01 00:00 UTC</sub>\n\n| 标题 | 状态 | 信息描述 |\n| --- | --- | --- |\n| Legacy import 中文 | 🚧 | 验证未通过: Signature |\n",
-    "detail": "# Legacy import 中文\n\n<sub>2026-01-01 00:10 UTC</sub>\n\n🚧\n\n验证未通过: Signature\n\n目标: Preserve schema and current acceptance evidence\n\n下一步: Resolve synthetic signature check\n\n最近核查: 2026-01-01 00:00 UTC, 需更新\n\n## 步骤\n\n- ✅ Imported completed step\n- 🕒 Pending old\\-schema step\n\n## 验证\n\n- ❌ Signature：Synthetic signature needs renewal\n"
+    "list": "# 任务列表 · <sub>2026-10-01 08:00:00</sub>\n\n| 标题 | 状态 | 信息描述 |\n| --- | --- | --- |\n| Legacy import 中文 | 🚧 执行中 | 验证未通过: Signature |\n",
+    "detail": "# Legacy import 中文 · <sub>2026-01-01 08:10:00</sub>\n\nID: task-legacy\n\n🚧 执行中\n\n验证未通过: Signature\n\n目标: Preserve schema and current acceptance evidence\n\n下一步: Resolve synthetic signature check\n\n最近核查: 2026-01-01 08:00:30, 需更新\n\n## 步骤\n\n- ✅ Imported completed step\n- 🕒 Pending old\\-schema step\n\n## 验证\n\n- ❌ Signature：Synthetic signature needs renewal\n"
   }
 }

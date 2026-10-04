@@ -54,7 +54,7 @@ Startup does not authorize outgoing test messages or automatic replies. Addition
 
 ## Receiving and sending
 
-Receive private messages to the bot and group messages that mention this bot. Ignore other group messages. Store message content and type, and deduplicate by message and event IDs. Store non-text content without downloading attachments. See [Operations](references/operations.md) for details.
+Receive private messages to the bot and group messages that mention this bot. Ignore other group messages. Store message content and type, and deduplicate by message and event IDs. Store non-text content without downloading attachments. Text and post messages also have a bounded, untrusted text projection; see [rich text and thread replies](references/rich-text-and-threads.md) for the official references, content/content_v2 selection, supported wrappers, safety limits and evidence boundaries. See [Operations](references/operations.md) for details.
 
 ### Resolve the destination
 
@@ -71,7 +71,7 @@ bash feishu.sh inbox --limit 10
 bash feishu.sh inbox --limit 10 --show-text
 # Only for a user-requested send/reply; replace illustrative IDs with verified ones:
 bash feishu.sh send --config /path/to/temporary/config.yml --receive-id oc_example --text 'Requested message'
-bash feishu.sh reply --config /path/to/temporary/config.yml --message-id om_example --text 'Requested reply'
+bash feishu.sh reply --config /path/to/temporary/config.yml --message-id om_example --reply-in-thread --text 'Requested reply'
 ```
 
 Use the destination and content requested by the user, including chats or messages already confirmed in this conversation. When the request is complete and authorized, execute it without asking for the same confirmation again. Both private and group messages can use the corresponding `chat_id` (the default `--receive-id-type`); a known recipient `open_id`, for example, requires `--receive-id-type open_id`. Replies use a `message_id` from the intended conversation. These are per-operation arguments and do not belong in the configuration file.

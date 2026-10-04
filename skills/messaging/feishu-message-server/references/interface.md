@@ -19,7 +19,7 @@ Installation, `setup`, `prepare`, `init`, capability inspection, sending and inb
 ```bash
 # Content through stdin is supplied by the authorized caller.
 bash feishu.sh send --config "$CONFIG_FILE" --expected-app-id "$APP_ID" --expected-brand feishu --receive-id "$CHAT_ID" --receive-id-type chat_id --format card --idempotency-key "$KEY" --stdin
-bash feishu.sh reply --config "$CONFIG_FILE" --expected-app-id "$APP_ID" --expected-brand feishu --message-id "$MESSAGE_ID" --format markdown --idempotency-key "$KEY" --stdin
+bash feishu.sh reply --config "$CONFIG_FILE" --expected-app-id "$APP_ID" --expected-brand feishu --message-id "$MESSAGE_ID" --reply-in-thread --format markdown --idempotency-key "$KEY" --stdin
 ```
 
 `text` (default) wraps exact Unicode in the SDK's text content. `markdown` constructs an interactive JSON 2.0 card with `body.elements:[{tag:"markdown",content:TEXT}]`; pipe tables are rejected, not converted to plain text. `card` accepts a JSON 1.0 object with an `elements` array or JSON 2.0 with `body.elements`. The server validates the envelope/size; the provider decides detailed card validity. Send a complete native card to preserve columns. No implicit fallback, truncation or retry occurs. Text remains backward compatible. Card/Markdown payloads share the 28,000-byte content bound. Idempotency keys are passed unchanged to the official SDK `uuid` field.
@@ -41,7 +41,7 @@ bash feishu.sh inbox-page --state-dir "$STATE_DIR" --cursor "$CURSOR" --limit 10
 {"protocol_version":1,"messages":[{"cursor":"opaque-after-this-message","message":{"app_id":"fixture-app","tenant_key":"fixture-tenant","event_id":"fixture-event","message_id":"fixture-message","chat_id":"fixture-chat","chat_type":"p2p","sender_open_id":"fixture-sender","sender_tenant_key":"fixture-tenant","message_type":"text","text":"/tasks list","content":"original-provider-content","bot_mention_keys":[],"received_at":1700000000}}],"next_cursor":"opaque-after-last-message","has_more":false}
 ```
 
-The listed message metadata is the durable receiver record. `text`/`content` appear only with `--show-text`; non-text records have no inferred text. `message_created_ms`, status and trust metadata may also be present. `received_at` is receiver time in epoch seconds, not sender time. `bot_mention_keys` includes only placeholders matched to the authenticated/configured bot identity. Do not trust arbitrary mention claims.
+The listed message metadata is the durable receiver record. `text`/`content`/`content_v2` appear only with `--show-text`. Text and post records may include a bounded text projection with `text_source` and `text_omitted`; other types have no inferred text. See [rich-text projection and thread replies](rich-text-and-threads.md). `message_created_ms`, status and trust metadata may also be present. `received_at` is receiver time in epoch seconds, not sender time. `bot_mention_keys` includes only placeholders matched to the authenticated/configured bot identity. Do not trust arbitrary mention claims.
 
 Optional `parent_id`, `root_id`, and `thread_id` preserve exact provider message-envelope identifiers (1–256 characters, without whitespace/control characters). Missing, empty, or malformed values are omitted; old records remain valid. These are correlation hints only, not sender identity or authorization evidence. They are never inferred from text, quoted content, or other message IDs. Both the local task adapter and remote bridge adapter preserve these fields.
 

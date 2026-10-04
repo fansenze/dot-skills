@@ -1,6 +1,6 @@
-# $title
+# $title · <sub>$updated_at</sub>
 
-<sub>$updated_at</sub>
+ID: $id
 
 $status_badge
 

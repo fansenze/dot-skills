@@ -46,8 +46,8 @@ test('documented CLI transcript executes with no credentials and normalized reco
 test('Feishu renders native columns and explicit escaped Markdown/plain text without executing task content',t=>{
   const tmp=fixture(t),adapter=createConnector({server:path.join(ROOT,'scripts/taskctl.mjs'),config_ref:path.join(tmp,'unused-config'),state_dir:tmp,account_id:'fixture-app',brand:'feishu'});
   const doc={title:'Tasks',updated_at:'2026-01-01T00:00:00Z',columns:['Title','Status','Summary'],rows:[['用户 | <at id=all>','🚧','$(do-not-run) **private**']],details:['Failed: requested result not met']};
-  const card=adapter.render('card',doc); assert.equal(card.elements[1].tag,'column_set');assert.equal(card.elements[2].columns.length,3);assert.equal(card.elements[2].columns[0].elements[0].text.tag,'plain_text');
-  assert.equal(card.elements[2].columns[0].elements[0].text.content,doc.rows[0][0]);assert.match(adapter.render('markdown',doc),/&lt;at id=all&gt;/);assert.doesNotMatch(adapter.render('markdown',doc),/^\|/m);
+  const card=adapter.render('card',doc); assert.equal(card.elements[1].tag,'column_set');assert.equal(card.elements[1].columns.length,3);assert.equal(card.elements[1].columns[0].elements[0].text.tag,'plain_text');
+  assert.equal(card.elements[1].columns[0].elements[0].text.content,doc.rows[0][0]);assert.match(adapter.render('markdown',doc),/&lt;at id=all&gt;/);assert.doesNotMatch(adapter.render('markdown',doc),/^\|/m);
   assert.match(adapter.render('text',doc),/用户 \|/);assert.throws(()=>adapter.render('html',doc),/Unsupported/);
 });
 

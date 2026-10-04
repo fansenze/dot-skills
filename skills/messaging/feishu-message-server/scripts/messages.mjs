@@ -1,3 +1,4 @@
+import {extractReadableContent} from './content.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -68,7 +69,8 @@ export function readInboxPage(filename, {cursor = null, limit = 100, showText = 
     const messages = rows.map((row, index) => {
       if (row.rowid !== offset + index + 1) throw new SafeError('Inbox cursor gap: retained messages are incomplete');
       const message = JSON.parse(row.message_json);
-      if (!showText) { delete message.text; delete message.content; }
+      if (showText) Object.assign(message, extractReadableContent(message));
+      else { delete message.text; delete message.content; delete message.content_v2; }
       return {cursor: encodeCursor(stream, row.rowid), message};
     });
     const end = rows.at(-1)?.rowid ?? offset;
@@ -87,7 +89,8 @@ export function readInbox(filename, limit = 20, showText = false) {
     return db.prepare('SELECT message_json FROM messages ORDER BY rowid DESC LIMIT ?').all(limit)
       .map(({message_json}) => {
         const message = JSON.parse(message_json);
-        if (!showText) { delete message.text; delete message.content; }
+        if (showText) Object.assign(message, extractReadableContent(message));
+      else { delete message.text; delete message.content; delete message.content_v2; }
         return message;
       });
   } finally { db.close(); }
@@ -114,10 +117,7 @@ export function extractMessage(payload, config) {
   if (!nonempty(message.message_id)) return reject('missing_message_id');
   // Keep all message types as data. Do not infer tasks or fetch attachments.
   const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? {});
-  let text;
-  if (message.message_type === 'text') {
-    try { const parsed = JSON.parse(content); if (typeof parsed?.text === 'string') text = parsed.text; } catch {}
-  }
+  const contentV2 = message.content_v2 === undefined ? {} : {content_v2: typeof message.content_v2 === 'string' ? message.content_v2 : JSON.stringify(message.content_v2)};
   return {reason: 'accepted', message: {
     app_id: config.app_id, tenant_key: typeof header.tenant_key === 'string' ? header.tenant_key : '',
     event_id: nonempty(header.event_id) ? header.event_id : message.message_id, message_id: message.message_id,
@@ -125,7 +125,7 @@ export function extractMessage(payload, config) {
     sender_open_id: senderId.open_id ?? null, sender_tenant_key: sender.tenant_key ?? null,
     bot_mention_keys: (Array.isArray(message.mentions) ? message.mentions : []).filter(m => config.bot_open_id && object(object(m).id).open_id === config.bot_open_id)
       .map(m => m.key).filter(k => typeof k === 'string' && k.startsWith('@')),
-    ...replyContext(message), content, ...(text === undefined ? {} : {text}),
+    ...replyContext(message), content, ...contentV2, ...extractReadableContent({...message, content, ...contentV2}),
     message_created_ms: String(message.create_time ?? ''), received_at: Date.now() / 1000,
     status: 'received', trust: 'unverified_external_input'
   }};

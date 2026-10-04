@@ -68,14 +68,14 @@ test('capabilities and inbox-page require no credential file; binding mismatch s
 
 test('card and markdown use interactive create/reply payloads and unchanged idempotency IDs', async t => {
   const network=createNetwork();t.after(()=>network.close());const calls=[];
-  network.httpInstance.defaults.adapter=async request=>{calls.push(request);return {data:request.url.includes('tenant_access_token')?{code:0,tenant_access_token:'fixture-token',expire:7200}:{code:0,data:{message_id:'fixture-result'}},status:200,statusText:'OK',headers:{},config:request};};
+  network.httpInstance.defaults.adapter=async request=>{calls.push(request);return {data:request.url.includes('tenant_access_token')?{code:0,tenant_access_token:'fixture-token',expire:7200}:{code:0,data:{message_id:'fixture-result',thread_id:'thread-fixture',root_id:'root-fixture',parent_id:'parent-fixture'}},status:200,statusText:'OK',headers:{},config:request};};
   const client=createClient(fromMapping({app_id:'fixture-format',app_secret:'fixture-secret'}),network);
   const card={elements:[{tag:'div',text:{tag:'plain_text',content:'测试 | <at id=all>'}}]};
   assert.equal((await sendMessage(client,{receiveId:'fixture-chat',format:'card',body:card,idempotencyKey:'card-fixed'})).ok,true);
-  assert.equal((await sendMessage(client,{messageId:'fixture-original',format:'markdown',body:'**Result**',idempotencyKey:'markdown-fixed'})).ok,true);
+  const reply=await sendMessage(client,{messageId:'fixture-original',format:'markdown',body:'**Result**',idempotencyKey:'markdown-fixed',replyInThread:true});assert.equal(reply.ok,true);assert.equal(reply.thread_id,'thread-fixture');assert.equal(reply.root_id,'root-fixture');
   const outgoing=calls.filter(c=>c.url.includes('/im/v1/')).map(c=>JSON.parse(c.data));
   assert.equal(outgoing[0].msg_type,'interactive');assert.equal(outgoing[0].uuid,'card-fixed');assert.deepEqual(JSON.parse(outgoing[0].content),card);
-  assert.equal(outgoing[1].uuid,'markdown-fixed');assert.equal(JSON.parse(outgoing[1].content).body.elements[0].content,'**Result**');
+  assert.equal(outgoing[1].uuid,'markdown-fixed');assert.equal(outgoing[1].reply_in_thread,true);assert.equal(JSON.parse(outgoing[1].content).body.elements[0].content,'**Result**');
   const before=calls.length;
   await assert.rejects(sendMessage(client,{receiveId:'fixture-chat',format:'markdown',body:'| A | B |',idempotencyKey:'unsupported'}),/tables/);
   await assert.rejects(sendMessage(client,{receiveId:'fixture-chat',format:'unknown',body:'hi',idempotencyKey:'unsupported'}),/Unsupported/);

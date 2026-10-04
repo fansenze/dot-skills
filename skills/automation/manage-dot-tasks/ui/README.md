@@ -1,41 +1,34 @@
-# Task Views
+# Task views
 
-Fixed view labels default to English. `render ... --language zh` explicitly selects Chinese labels; task titles, summaries, goals, and evidence retain their original language. Documentation and CLI-generated event labels are English.
+The durable state machine and acceptance rules are unchanged. CLI view labels retain English by default; select `render ... --language zh` for this workflow. Task notifications default to Chinese. Original task content is not translated.
 
-The two independent Markdown templates use `$name` or `${name}` placeholders. Use `$$` for a literal dollar sign. Templates control layout only; they do not change records or acceptance rules.
+## Four displayed states
 
-## List: list.md
+| Internal state | Chinese status | English status | Required explanation |
+| --- | --- | --- | --- |
+| queued | 排队中 | Pending | Actual next action when known |
+| blocked | 排队中 | Pending | Explicitly blocked/waiting; full reason and user action, never a claim of running |
+| executing, awaiting_verification | 执行中 | In progress | Current work/checking summary |
+| completed | 成功 | Succeeded | Actual acceptance time and completion result |
+| failed | 失败 | Failed | Actual failure and useful next action |
+| cancelled | 失败 | Failed | Explicitly cancelled and not completed |
 
-Use a title, subdued generation time, and the three columns Title / Status / Summary. Do not add counts, an overview, an attention section, a legend, or repeated explanations.
+Do not show raw `executing` or `awaiting_verification` as a user status. An ended execution does not imply success. Authorized requests whose parsing/creation failed appear in “未创建的请求” with 失败, a request ID, actual failure stage and reason, without a fabricated task.
 
-- `$list_title`: `Tasks` by default.
-- `$generated_at`: the current render time with timezone, not the latest task check.
-- `$tasks`: an escaped three-column table, or `No tasks` if none are visible.
-- Completed tasks show `✅` plus the actual `completion.at`. Active, blocked, awaiting-verification, and failed tasks show `🚧`. Queued and cancelled tasks show `🕒`.
-- Explain blocked, awaiting-verification, failed, and cancelled states in Summary without adding a legend.
-- Prefer the short recorded `summary`, then a progress event, active step, or next action. Completed rows use the completion summary. Current failed checks remain visible.
-- Hide only completed tasks whose `updated_at` is at least ten minutes old. Recent completed tasks and all unfinished tasks remain visible. `--all` includes hidden records; filtering never deletes data.
-- Reading or rendering does not refresh task activity. Use neither render time nor update time in place of completion time.
-- Active scheduling is joined into Summary: scheduled time, processing, retry, reconciliation, or failure. The same task keeps its existing status badge and acceptance meaning. An active schedule keeps an otherwise hidden completed task visible in rendered views; `list` remains the compatible lightweight task index.
+## List and detail
 
-## Detail: task-detail.md
+`list.md` has a title with the generation timestamp appended on its right in the same line and Title / Status / Summary columns. Completed rows use actual `completion.at`; their inactivity filter stays ten minutes except for scheduling/notification issues. `--all` reveals old completed tasks without deleting anything. Pending, failed and unknown delivery remain in the summary independently of acceptance.
 
-Use the title, subdued task update time, the same status marker, and a current summary. Add Goal, Next, Steps, Checks, and Results only when they have content. Avoid numbered overviews, a full timeline, empty sections, or generic state explanations.
+`task-detail.md` uses the actual task name as its heading, then stable ID, status, concise summary and populated goal/next/steps/checks/results sections. It is not a one-row list. Do not repeat the task title as a body field or create empty sections. Current failed checks and full blockers must remain visible. The original event/check history remains available with `show`.
 
-- `$title`, `$updated_at`, `$status_badge`: task title, actual activity time, and status.
-- `$summary`: concise current facts, preserving blocker, failure, and verification meaning.
-- `$sections`: populated paragraphs and sections; show step titles and reasons for skipped steps.
-- Current failed checks cannot be displaced by many passing checks. Historical checks do not become current acceptance; show `Reverification needed` when appropriate.
-- A short summary does not hide the full current blocker. For stale execution observations, show the actual observation time and `update needed`.
-- Original step evidence, check history, and events remain available through `show ID`.
-- Scheduling appears in the summary when present; `queue --task-id ID` exposes details separately. Ordinary tasks render identically when no scheduling exists. Source coverage is reported through `coverage` and the assistant's scoped status report, without adding columns or generic warnings to every task.
+Placeholders: list uses `$list_title`, `$generated_at`, `$tasks`; detail uses `$title`, `$id`, `$updated_at`, `$status_badge`, `$summary`, `$sections`. Templates control layout only. Existing schema-1 task projections retain their compatible timestamp/byte format; this change affects user views.
 
-## Markdown and message adaptation
+## Time and renderer constraints
 
-Escape pipes and Markdown/HTML in single-line content. Collapse line breaks without creating extra table columns. `<sub>` denotes subdued timestamps; do not claim an unsupported renderer actually displayed gray text.
+User-view timestamps use `Asia/Shanghai` and `YYYY-MM-DD HH:MM:SS` without fractional seconds. The implementation is centralized in `scripts/presentation.mjs`; record storage remains timezone-aware ISO. Generation time, task update time and actual completion time remain distinct.
 
-A separately authorized Lark/Feishu sender should map the timestamp to a gray `note` and the three columns to native `column_set` elements with weighted widths instead of placing unsupported Markdown tables inside `lark_md`. Map detail titles, timestamps, and bodies to the appropriate card elements. Keep these Markdown files as reusable source templates. The bundled Feishu adapter implements this mapping for explicitly authorized subscriptions through the transactional outbox. Explicit Markdown/text formats render escaped lines, without silent fallback.
+CommonMark headings and the current native Feishu card title field cannot guarantee a separate, flush-right timestamp. The explicit portable design is `Title · YYYY-MM-DD HH:MM:SS` on the heading line; Markdown uses `<sub>` where supported. Long headings may wrap on a narrow screen. Do not claim actual right alignment, gray color or identical mobile/desktop layout without live evidence.
 
-Do not infer completion from empty values or generate links to nonexistent detail pages. Only bundle titles link to generated detail files. Failed tasks should retain their explanation and useful next action. Keep summaries to one or two facts, not copied logs or long acceptance text. Result links must be real and accessible to their audience; local paths are not web links.
+List cards use native weighted columns with plain-text cells, avoiding unsupported Markdown tables and active mentions/actions. Single-task cards have the task title, timestamp, stable ID and detail paragraphs, with no list heading or table columns. Text and Markdown transports use safe lines. Result links must be real and audience-accessible. No renderer turns untrusted task/post text into code or additional authorization.
 
-Notification pending, failed and unknown-delivery states join Summary without changing the status badge or acceptance outcome. They keep affected completed tasks visible until delivery is settled or cancelled. Notification receipts do not trigger further notifications. Cards preserve user content as plain-text cells; live client rendering requires separate acceptance.
+Failure cards retain the recorded terminal-state reason even when an earlier summary exists, and show a useful next action. Receipt acknowledgements say that the request is queued for review; they do not claim task creation or execution success.

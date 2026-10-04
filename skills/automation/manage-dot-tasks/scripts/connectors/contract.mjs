@@ -1,3 +1,4 @@
+import {uiTime} from '../presentation.mjs';
 /** Versioned task/server connector boundary. Modules are explicitly trusted code. */
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -45,6 +46,7 @@ export function sendResult(raw, key) {
     try { result.message_id = requireText(raw.message_id, 'message ID'); }
     catch { return sendResult(null, key); }
   }
+  for (const k of ['parent_id','root_id','thread_id']) if (typeof raw[k] === 'string' && /^[^\s\x00-\x1f\x7f]{1,256}$/u.test(raw[k])) result[k]=raw[k];
   for (const k of ['error_code', 'request_phase']) if (typeof raw[k] === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(raw[k])) result[k] = raw[k];
   for (const k of ['code', 'http_status', 'elapsed_ms']) if (Number.isSafeInteger(raw[k])) result[k] = raw[k];
   return result;
@@ -58,5 +60,5 @@ export async function bounded(operation, timeout = 75000) {
 const escape = s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replace(/([\\`*_{}\[\]()#!|>~])/g, '\\$1');
 export function renderText(document, markdown = false) {
   const safe = markdown ? escape : String;
-  return [safe(document.title), safe(document.updated_at), ...document.rows.map(row => row.map(safe).join(' · ')), ...document.details.map(safe)].filter(Boolean).join('\n');
+  return [safe(document.title)+' · '+safe(uiTime(document.updated_at)), ...document.rows.map(row => row.map(safe).join(' · ')), ...document.details.map(safe)].filter(Boolean).join('\n');
 }

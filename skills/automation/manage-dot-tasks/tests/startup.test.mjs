@@ -19,7 +19,7 @@ async function fixture(t, scope='task-one', watchExtra=[]) {
   const cli=(...args)=>{const p=spawnSync(process.execPath,[path.join(ROOT,'scripts/taskctl.mjs'),'--store',store,...args],{encoding:'utf8'});assert.equal(p.status,0,p.stderr);return JSON.parse(p.stdout);};
   const connect=['connect','--id','fixture','--module',path.join(ROOT,'tests/fixtures/connector.mjs'),'--settings-file',settings];
   const grant=['allow-inbound','--id','conversation','--connector','fixture','--account','app-one','--tenant','tenant-one','--sender','sender-one','--destination','chat-one','--mode','agent','--commands','query,create,continue','--tasks',scope,'--allow-new','--updates','--format','card'];
-  const watch=['watch','--id','updates','--connector','fixture','--account','app-one','--destination','chat-one','--format','card','--events','registered,progress,blocked,failed,completed,verification,result,execution','--tasks',scope,'--initial',...watchExtra];
+  const watch=['watch','--id','updates','--connector','fixture','--account','app-one','--destination','chat-one','--format','card','--events','completed','--tasks',scope,'--initial',...watchExtra];
   cli('init'); await call('register','--id','task-one','--title','Existing authorized task','--goal','Verified outcome','--status','executing');
   cli(...connect); cli(...grant); if(scope!=='none')cli(...watch);
   const state=()=>json(path.join(store,'integration.json'));
@@ -59,7 +59,7 @@ test('new-task-only setup excludes pre-existing records, and recorded recovery r
 
 for(const variant of ['same-route','disabled','other-format','other-destination','other-event','other-task','second-watch']){
   test(`watch/grant update overlap: ${variant}`,async t=>{
-    const extra=variant==='other-format'?['--format','text']:variant==='other-destination'?['--destination','other-chat']:variant==='other-event'?['--events','completed']:variant==='other-task'?['--tasks','unrelated']:[];
+    const extra=variant==='other-format'?['--format','text']:variant==='other-destination'?['--destination','other-chat']:variant==='other-event'?['--events','registered']:variant==='other-task'?['--tasks','unrelated']:[];
     const f=await fixture(t,'task-one',extra);await f.call('deliver','--consumer','fixture');
     await f.message();await f.call('deliver','--consumer','fixture');
     // Decision response is always retained, including reply anchor.
@@ -67,19 +67,19 @@ for(const variant of ['same-route','disabled','other-format','other-destination'
     if(variant==='disabled')await f.call('unwatch','updates');
     if(variant==='second-watch')await f.call(...f.watch,'--id','updates-two');
     await f.call('deliver','--consumer','fixture');const before=f.effects().length;
-    await f.call('update','task-one','--summary','Meaningful progress');await f.call('deliver','--consumer','fixture');
+    await f.call('update','task-one','--status','awaiting_verification','--reason','Ready to check');await f.call('check','task-one','--name','Acceptance','--outcome','pass','--evidence','Synthetic');await f.call('complete','task-one','--summary','Verified completion','--evidence','Synthetic');await f.call('deliver','--consumer','fixture');
     const added=f.effects().slice(before);
     assert.equal(added.length,['other-format','other-destination','second-watch'].includes(variant)?2:1);
-    if(['same-route','second-watch'].includes(variant))assert.ok(added.every(e=>e.reply_to===null));
+    if(['same-route','second-watch'].includes(variant))assert.ok(added.every(e=>e.reply_to==='message-one'&&e.reply_in_thread===true));
     if(['disabled','other-event','other-task'].includes(variant))assert.equal(added[0].reply_to,'message-one');
   });
 }
 
-test('all-scope watch handles newly created task once while preserving its decision reply',async t=>{
+test('all-scope completion watch does not send intermediate task progress',async t=>{
   const f=await fixture(t,'all');await f.call('deliver','--consumer','fixture');
   const {result}=await f.message('create');await f.call('deliver','--consumer','fixture');
   const before=f.effects().length;await f.call('update',result.task_id,'--summary','New task progress');await f.call('deliver','--consumer','fixture');
-  assert.equal(f.effects().length-before,1);
+  assert.equal(f.effects().length-before,0);
   assert.ok(f.effects().some(e=>e.reply_to==='message-one'));
 });
 

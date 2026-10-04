@@ -45,3 +45,13 @@ Review these against startup.md and the supporting contracts; record any unresol
 12. **pnpm child lookup:** a parent invocation of pnpm 11.27.0 does not prove that child scripts find it. Put the verified bin directory first on PATH, propagate that environment to later calls and verify a Node child's version before dependency setup/checks.
 
 These checks establish implementation and instruction consistency. They do not establish real Feishu network delivery, a running user's receiver, platform-memory persistence, agent interpretation quality across arbitrary prompts, full platform discovery, or permanent background availability.
+
+## Threaded post intake and completion-only acceptance
+
+Use synthetic text/post inputs in the verified scope. Expect one receipt acknowledgement before work; malformed authorized input produces one failed-request response, while wrong sender/destination and old input produce none. Confirm the original post/content_v2 representation is not duplicated, old rejected IDs are not replayed, and task creation recovery preserves one task.
+
+Display only 排队中 / 执行中 / 成功 / 失败 with Asia/Shanghai seconds. Blocked tasks must show a stopped/waiting reason; cancelled tasks must explicitly say cancelled. Querying one task uses its name as title and stable ID with no one-row list. Changes during execution/verification do not send proactively. After verified complete, drain one completion notice in the original topic; an unknown receipt never triggers blind resend.
+
+Reply to an original incoming message, an older accepted bot reply, and a thread-only reference. Confirm scoped reference evidence and stable Codex/dot bindings remain available. An explicit session query is interpreted by the agent; ambiguous new text remains unassigned until clarified. Different senders/destinations cannot contribute conversation history. Report 20-reference/50-task/200-source truncation instead of assuming complete coverage.
+
+Historical failure annotations never send/replay. Newly unrecoverable creation failures use message-fail only after checking journal, decision and source binding. Run the parent-coordinated fictional demo only after deployment and explicit messaging authorization.

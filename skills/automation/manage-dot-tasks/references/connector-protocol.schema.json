@@ -151,6 +151,10 @@
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "reply_in_thread": {
+          "type": "boolean",
+          "description": "Optional frozen thread reply flag; absent preserves legacy false."
         }
       },
       "additionalProperties": false
@@ -205,6 +209,24 @@
         },
         "elapsed_ms": {
           "type": "integer"
+        },
+        "parent_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Provider envelope context only; never task authority."
+        },
+        "root_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Provider envelope context only; never task authority."
+        },
+        "thread_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Provider envelope context only; never task authority."
         }
       },
       "additionalProperties": false,
