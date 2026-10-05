@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {createConversations, readConversations, CONVERSATION_OPTIONS, CONVERSATION_IDS} from './task-conversations.mjs';
 import {uiTime, userStatus} from './presentation.mjs';
 /** Dependency-free task management and scheduling. Node.js 22.18+; Linux/macOS. */
 import fs from 'node:fs';
@@ -181,7 +182,7 @@ export class Store {
       else{try{fs.unlinkSync(path.join(candidate,token));fs.rmdirSync(candidate);}catch(e){if(e.code!=='ENOENT')throw e;}}
     }
   }
-  recover(){const journal=this.path('.transaction.json');if(!fs.existsSync(journal))return;const tx=read_json(journal);if(!record(tx)||tx.schema_version!==VERSION||!record(tx.writes))throw new TaskError('invalid recovery journal; preserve store for inspection');for(const [rel,content]of Object.entries(tx.writes)){if(!(['store.json','tasks.json','scheduler.json','integration.json'].includes(rel)||/^tasks\/[a-z][a-z0-9-]{2,63}\/(task\.json|goal\.md|steps\.md|events\.jsonl|verification\.md|results\.md)$/.test(rel))||typeof content!=='string')throw new TaskError('unsafe recovery journal; preserve store for inspection');this.path(rel);}for(const [rel,content]of Object.entries(tx.writes))atomic_write(this.path(rel),content);fs.unlinkSync(journal);this.sync_root();}
+  recover(){const journal=this.path('.transaction.json');if(!fs.existsSync(journal))return;const tx=read_json(journal);if(!record(tx)||tx.schema_version!==VERSION||!record(tx.writes))throw new TaskError('invalid recovery journal; preserve store for inspection');for(const [rel,content]of Object.entries(tx.writes)){if(!(['store.json','tasks.json','scheduler.json','integration.json','conversations.json'].includes(rel)||/^tasks\/[a-z][a-z0-9-]{2,63}\/(task\.json|goal\.md|steps\.md|events\.jsonl|verification\.md|results\.md)$/.test(rel))||typeof content!=='string')throw new TaskError('unsafe recovery journal; preserve store for inspection');this.path(rel);}for(const [rel,content]of Object.entries(tx.writes))atomic_write(this.path(rel),content);fs.unlinkSync(journal);this.sync_root();}
   sync_root(){sync_dir(this.root);}
   commit(writes){for(const rel of Object.keys(writes))this.path(rel);atomic_write(this.path('.transaction.json'),encoded({schema_version:VERSION,writes}));this.recover();}
   config(){const c=read_json(this.path('store.json'));if(!record(c)||c.schema_version!==VERSION)throw new TaskError('unsupported/invalid store schema');if(typeof c.stale_hours!=='number'||!Number.isFinite(c.stale_hours)||c.stale_hours<=0)throw new TaskError('stale_hours must be positive and finite');return c;}
@@ -214,12 +215,12 @@ const COMMAND_OPTIONS={
   step:['step-id','title','state','evidence','expected-revision'],event:['text','kind','source','expected-revision'],
   observe:['state','source','observed-at','run-id','source-version','expected-revision'],check:['name','outcome','evidence','checked-at','expected-revision'],
   result:['label','url','expected-revision'],complete:['summary','evidence','expected-revision'],
-  list:['status','all'],show:[],render:['output','all','language','templates'],doctor:[],verify:[],...SCHEDULER_OPTIONS,...INTEGRATION_OPTIONS
+  list:['status','all'],show:[],render:['output','all','language','templates'],doctor:[],verify:[],...SCHEDULER_OPTIONS,...INTEGRATION_OPTIONS,...CONVERSATION_OPTIONS
 };
 const DEFAULT_TEMPLATES=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../ui');
 export function help(command) {
   const first='taskctl — task management and scheduling (Node.js 22.18+)\n';
-  if(command&&has(COMMAND_OPTIONS,command))return first+`Usage: node taskctl.mjs [--store PATH] ${command}${['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS].includes(command)?' ID':command==='render'?' list|detail|bundle [ID]':''} [options]\nOptions: `+COMMAND_OPTIONS[command].map(o=>'--'+o).join(', ')+'\nSee references/cli.md for required fields and examples.\n';
+  if(command&&has(COMMAND_OPTIONS,command))return first+`Usage: node taskctl.mjs [--store PATH] ${command}${['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS,...CONVERSATION_IDS].includes(command)?' ID':command==='render'?' list|detail|bundle [ID]':''} [options]\nOptions: `+COMMAND_OPTIONS[command].map(o=>'--'+o).join(', ')+'\nSee references/cli.md for required fields and examples.\n';
   return first+'Usage: node taskctl.mjs [--store PATH] [--lock-timeout SECONDS] COMMAND [options]\nCommands: '+Object.keys(COMMAND_OPTIONS).join(', ')+'\nUse COMMAND --help for command options.\n';
 }
 export function default_store({ env = process.env, platform = process.platform, home = os.homedir(), dot_shared = fs.existsSync('/workspace/shared') } = {}) {
@@ -235,7 +236,7 @@ export function parse_args(argv=process.argv.slice(2)) {
   while(i<argv.length&&argv[i].startsWith('-')){if(['--help','-h'].includes(argv[i]))return {...args,help:help()};option(['store','lock-timeout']);}
   args.command=argv[i++];if(!has(COMMAND_OPTIONS,args.command))throw new TaskError('a valid command is required; use --help');
   const positional=[];while(i<argv.length){if(['--help','-h'].includes(argv[i]))return {...args,help:help(args.command)};if(argv[i].startsWith('--'))option(COMMAND_OPTIONS[args.command]);else positional.push(argv[i++]);}
-  const cmd=args.command,needsId=['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS].includes(cmd);
+  const cmd=args.command,needsId=['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS,...CONVERSATION_IDS].includes(cmd);
   if(needsId){if(positional.length!==1)throw new TaskError(`${cmd} requires one ID`);args.id=positional[0];}
   else if(cmd==='render'){if(positional.length<1||positional.length>2||!['list','detail','bundle'].includes(positional[0]))throw new TaskError('render requires list, detail, or bundle');[args.view,args.id]=positional;}
   else if(positional.length)throw new TaskError(`unexpected argument: ${positional[0]}`);
@@ -277,12 +278,13 @@ export async function run(args) {
   if(cmd==='start')await run({...args,command:'init',stale_hours:24,snapshot_note:''});
   const scheduler=create_scheduler({store,TaskError,encoded,read_json,nonempty,task_id,timestamp,timestamp_us,observed_time,newer_execution,now,event_record,display_time});
   const integration=createIntegration({store,scheduler,makeTask:make_task});
+  if(has(CONVERSATION_OPTIONS,cmd))return createConversations({store}).run(args);
   if(has(INTEGRATION_OPTIONS,cmd))return integration.run(args);
   if(['wait','next-batch'].includes(cmd))return scheduler.wait(args);
   return store.locked(async()=>{
     if(cmd==='init'){
       if(!Number.isFinite(args.stale_hours)||args.stale_hours<=0)throw new TaskError('stale hours must be positive and finite');
-      if(fs.existsSync(store.path('store.json'))){store.config();store.all();scheduler.inspect();readIntegration(store);return initialization_result(store,false);}
+      if(fs.existsSync(store.path('store.json'))){store.config();store.all();scheduler.inspect();readIntegration(store);readConversations(store);return initialization_result(store,false);}
       if(fs.readdirSync(store.root).some(n=>n!=='.lock'&&n!=='.lock-node'&&!recognized_lock_candidate(store,n)))throw new TaskError('directory is not an empty task store; choose another directory');
       store.commit({'store.json':encoded({schema_version:VERSION,created_at:now(),stale_hours:args.stale_hours,snapshot_note:args.snapshot_note}),'tasks.json':'[]\n'});
       return initialization_result(store,true);
@@ -304,7 +306,7 @@ export async function run(args) {
         for(const name of Object.keys(projections(t))){const p=store.path(`tasks/${t.id}/${name}`);if(!fs.existsSync(p))throw new TaskError(`derived file mismatch: ${t.id}/${name}`);actual[name]=fs.readFileSync(p,'utf8');}
         if(!['en','zh'].some(language=>Object.entries(projections(t,language)).every(([name,expected])=>actual[name]===expected)))throw new TaskError(`derived file mismatch: ${t.id}`);
       }
-      scheduler.inspect();readIntegration(store);
+      scheduler.inspect();readIntegration(store);readConversations(store);
       return {ok:true,tasks:tasks.length,checked_at:now(),scope:'local integrity; this does not execute tests or verify external claims'};
     }
     if(cmd==='render'){

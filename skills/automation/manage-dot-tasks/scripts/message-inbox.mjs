@@ -1,3 +1,4 @@
+import {conversationContext, canonicalDecision} from './task-conversations.mjs';
 import {validateResponse, responseDocument, responseFormat, renderResponse} from './reply-presentation.mjs';
 /** Durable, scoped handoff to an active agent. No language parser or executor. */
 import fs from 'node:fs';
@@ -101,12 +102,13 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
         const replyMatches = accepted.filter(n=>refs.has(n.message_id) || (n.thread_id && refs.has(n.thread_id)));
         const replyParents = new Set(replyMatches.map(n=>n.in_reply_to).filter(Boolean));
         const referenced = referenceHistory.filter(p=>refs.has(p.envelope.message_id) || replyParents.has(p.envelope.message_id) || (r.envelope.thread_id && p.envelope.thread_id === r.envelope.thread_id));
+        const taskConversation=conversationContext(store,r);
         const bindings=scheduler.read().bindings.filter(b=>grantCovers(data,g,b.task_id));
         messages.push({id:r.id, token:r.lease.token, lease_until:r.lease.until, mode:r.decision?'ack':'interpret',
           acknowledgement:receipt ? {id:receipt.id,state:receipt.state,attempts:receipt.attempts,receipt:receipt.receipt} : null,
           envelope:structuredClone(r.envelope), grant:structuredClone(g), source:'connector-'+r.connector, source_ref:r.id,
           task_id:r.task_id ?? null, decision:r.decision ?? null,
-          context:{source_bindings:bindings.slice(0,200),source_coverage:bindings.length>200?'partial; use scoped lookup':'complete-at-claim',reply_references:accepted.slice(-20), referenced_replies:replyMatches.slice(0,20),
+          context:{task_conversation:taskConversation,source_bindings:bindings.slice(0,200),source_coverage:bindings.length>200?'partial; use scoped lookup':'complete-at-claim',reply_references:accepted.slice(-20), referenced_replies:replyMatches.slice(0,20),
             referenced_messages:referenced.slice(0,20).map(p=>({id:p.id,envelope:p.envelope,task_id:p.task_id??null,decision:p.decision})),
             reference_coverage:replyMatches.length>20 || referenced.length>20 ? 'partial; inspect scoped evidence' : 'complete-at-claim',
             messages:history
@@ -127,7 +129,7 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
     let d;
     try { if(fs.statSync(file).size>65536) throw new Error(); d=JSON.parse(fs.readFileSync(file,'utf8')); }
     catch { fail('Decision must be a readable JSON object within 64 KiB'); }
-    const fields=['decision','summary','reply','response','task_id','title','goal','next_action','authorization_ref','work_revision'];
+    const fields=['decision','summary','reply','response','task_id','title','goal','next_action','authorization_ref','work_revision','canonical_message_id'];
     if(!d || typeof d!=='object' || Array.isArray(d) || Object.keys(d).some(k=>!fields.includes(k))) fail('Unsupported decision fields');
     if(!['query','clarify','reject','create','continue'].includes(d.decision)) fail('Unsupported message decision');
     requireText(d.summary,'summary',1000);
@@ -169,7 +171,7 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
       if(d.decision==='create' && scheduler.execute({command:'lookup',source:'connector-'+r.connector,source_ref:r.id})) fail('Message source already belongs to a task; inspect and reconcile before creating');
       if(d.decision==='create') task=makeTask({id:'task-'+r.id.slice(0,32),title:d.title,goal:d.goal,next_action:d.next_action,summary:d.summary,source:'connector-'+r.connector,status:'queued',blocker:''});
       r.decision=structuredClone(d); r.task_id=task?.id??null; r.status='recorded'; r.recorded_at=stamp();
-      enqueue(data,'message:'+r.id,routeFor(c,g),d.response ? responseDocument(d.response,stamp()) : {title:task?.title ?? '任务回复',updated_at:stamp(),columns:[],rows:[],details:[...(task ? ['ID: '+task.id] : []),d.reply]},r.task_id,g.reply_mode==='reply'?r.envelope.message_id:null, g.reply_mode==='reply');
+      if(!canonicalDecision(store,r,d,task?.id))enqueue(data,'message:'+r.id,routeFor(c,g),d.response ? responseDocument(d.response,stamp()) : {title:task?.title ?? '任务回复',updated_at:stamp(),columns:[],rows:[],details:[...(task ? ['ID: '+task.id] : []),d.reply]},r.task_id,g.reply_mode==='reply'?r.envelope.message_id:null, g.reply_mode==='reply');
       // Combine the task's existing watch policies with the inbox transaction,
       // instead of clobbering either integration snapshot in Store.save.
       if(d.decision==='create') {

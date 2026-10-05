@@ -1,3 +1,4 @@
+import {readConversations, conversationContext, ownsConversationRoute, conversationCompletionWrites, createConversations} from './task-conversations.mjs';
 import {responseDocument, responseFormat} from './reply-presentation.mjs';
 import {validateHandshakes, expireHandshakes, handshakeCommand, matchHandshake} from './identity-handshake.mjs';
 import {taskResponseDocument as document} from './presentation.mjs';
@@ -76,12 +77,12 @@ export function readIntegration(store) {
 }
 export const requestFailures = store => readIntegration(store).inbox.filter(r=>r.failure).map(r=>({id:r.id,...r.failure}));
 export function decorateNotifications(store, tasks, language = 'en') {
-  const data = readIntegration(store), zh = language === 'zh';
+  const data = readIntegration(store), conversations=readConversations(store), zh = language === 'zh';
   return tasks.map(task => {
-    const notices = data.outbox.filter(n => n.task_id === task.id && !['api_accepted', 'cancelled'].includes(n.state));
+    const notices = [...data.outbox,...conversations.deliveries].filter(n => n.task_id === task.id && !['api_accepted', 'cancelled'].includes(n.state));
     if (!notices.length) return task;
     const uncertain = notices.filter(n => n.state === 'delivery_unknown').length;
-    const failed = notices.filter(n => ['api_error', 'dead'].includes(n.state)).length;
+    const failed = notices.filter(n => ['api_error', 'not_sent', 'dead'].includes(n.state)).length;
     const pending = notices.length - uncertain - failed;
     const parts = [];
     if (uncertain) parts.push(zh ? `通知送达待核查 ${uncertain}` : `Notification delivery unknown: ${uncertain}`);
@@ -112,8 +113,10 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
   if (prior && digest(prior.results) !== digest(current.results)) kinds.push('result');
   if (prior && digest(prior.execution) !== digest(current.execution)) kinds.push('execution');
   let changed = false;
+  const conversationWrites=conversationCompletionWrites(store,task,previous);
   const watchedRoutes = [];
   for (const watch of data.watches) {
+    if(ownsConversationRoute(store,task.id,watch))continue;
     const connection = data.connections.find(c => c.id === watch.connector && c.enabled);
     if (!connection || !watch.enabled || !covers(watch.tasks, task.id) || !watch.events.some(k => kinds.includes(k))) continue;
     const associated = data.inbox.filter(r => agentMessage(r) && r.binding === connection.binding && r.task_id === task.id && ['create','continue'].includes(r.decision?.decision)).findLast(r => {
@@ -128,6 +131,7 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
   // Progress follows an explicit updates grant and an agent-recorded association.
   // One latest associated incoming message per immutable grant is the reply anchor.
   if (previous && task.status === 'completed' && previous.status !== 'completed') for (const grant of data.grants.filter(g => g.mode === 'agent' && g.enabled && g.updates)) {
+    if(ownsConversationRoute(store,task.id,grant))continue;
     const connection = data.connections.find(c => c.id === grant.connector && c.enabled);
     const anchor = data.inbox.filter(r => agentMessage(r) && r.grant_id === grant.id && r.binding === connection?.binding && r.task_id === task.id && r.decision && ['create','continue'].includes(r.decision.decision)).at(-1);
     if (!connection || !anchor || !grantCovers(data,grant,task.id)) continue;
@@ -139,7 +143,7 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
     enqueue(data, 'task:'+task.id+':'+task.revision, route, document([task], grant.language ?? 'zh'), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null, grant.reply_mode === 'reply');
     changed = true;
   }
-  return changed ? writes(data) : {};
+  return {...conversationWrites,...(changed ? writes(data) : {})};
 }
 
 export function createIntegration({store, scheduler, makeTask}) {
@@ -308,7 +312,7 @@ export function createIntegration({store, scheduler, makeTask}) {
           }
           Object.assign(entry, {mode:'agent', grant_id:grant.id, binding:currentConnection.binding, envelope:messageEnvelope(e), status:'pending', reason:'awaiting-agent', lease:null, decision:null});
           const zh = (grant.language ?? 'zh') === 'zh';
-          enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant), responseDocument({template:'ack',lead:zh?'收到，正在处理。':'Received; I am reviewing your request.'},stamp()), null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
+          if(!conversationContext(store,entry).matches.length)enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant), responseDocument({template:'ack',lead:zh?'收到，正在处理。':'Received; I am reviewing your request.'},stamp()), null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
           save(data); return;
         }
         if (command.task_id && !store.index().some(t => t.id === command.task_id)) { entry.reason = 'unknown-task'; save(data); return; }
@@ -355,10 +359,14 @@ export function createIntegration({store, scheduler, makeTask}) {
           catch { if (!gaps.includes(c.id)) gaps.push(c.id); }
         }
         notifications.push(...(await deliver({consumer, limit: args.limit ?? 10, lease_ms: args.lease_ms})).notifications);
+        const conversations=createConversations({store});
+        notifications.push(...(await conversations.run({command:'conversation-deliver',consumer,limit:args.limit??10,lease_ms:args.lease_ms})).deliveries);
+        const dotDelivery=await conversations.run({command:'conversation-next',channel:'dot',consumer,lease_ms:args.lease_ms});
+        const conversationIssues=await locked(()=>{const rows=readConversations(store).deliveries.filter(n=>['delivery_unknown','not_sent','api_error'].includes(n.state));return {total:rows.length,deliveries:rows.slice(0,20).map(n=>({id:n.id,task_id:n.task_id,channel:n.channel,state:n.state}))};});
         const claimed = await messages.claim({consumer,limit:args.limit ?? 1,lease_ms:args.lease_ms,require_receipt_attempt:true});
-        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: claimed.messages.length ? 0 : Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
-        if (claimed.messages.length || queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
-          return {...queued, messages:claimed.messages, ingested, notifications, receive_gaps: gaps, readiness: connections.length ? 'configured-bindings; live transport not attested' : 'local-only; no server binding'};
+        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: claimed.messages.length || dotDelivery ? 0 : Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
+        if (conversationIssues.total || dotDelivery || claimed.messages.length || queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
+          return {...queued, conversation_issues:conversationIssues, conversation_deliveries:{dot:dotDelivery?[dotDelivery]:[]}, messages:claimed.messages, ingested, notifications, receive_gaps: gaps, readiness: connections.length ? 'configured-bindings; live transport not attested' : 'local-only; no server binding'};
         }
       } while (true);
     }
