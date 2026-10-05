@@ -6,6 +6,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import * as m from '../scripts/taskctl.mjs';
+import {renderResponse} from '../scripts/reply-presentation.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MODULE = fileURLToPath(new URL('./fixtures/connector.mjs', import.meta.url));
@@ -85,7 +86,7 @@ test('create records a stable task, source binding, decision and original-messag
   await assert.rejects(f.record(message,{...d,reply:'不同答复'}),/immutable/);
   await f.ack(message);assert.equal((await f.ack(message)).duplicate,true);
   await f.call('deliver','--consumer','sender');const effects=lines(path.join(f.external,'effects.jsonl'));
-  assert.equal(effects.length,2);assert.ok(effects.every(e=>e.reply_to==='message-1'&&e.reply_in_thread===true));assert.equal(effects[1].destination.id,'chat-one');assert.deepEqual(effects[1].body.details,['ID: '+task.id,d.reply]);
+  assert.equal(effects.length,2);assert.equal(effects[0].format,'text');assert.equal(effects[0].body,'收到，正在处理。');assert.ok(effects.every(e=>e.reply_to==='message-1'&&e.reply_in_thread===true));assert.equal(effects[1].destination.id,'chat-one');assert.deepEqual(effects[1].body.details,['ID: '+task.id,d.reply]);
   await f.ingest(f.incoming(2,{text:'继续刚才的任务'}));const follow=(await f.next()).messages[0];
   assert.deepEqual(follow.context.tasks.map(t=>t.id),[task.id]);assert.equal(follow.context.messages[0].task_id,task.id);
 });
@@ -312,4 +313,77 @@ test('reviewed historical rejection can be shown as failure without replay, repl
   assert.match(await f.call('render','list','--language','zh'),/已核实旧版本未处理富文本/);
   assert.deepEqual(f.state().checkpoints,before);assert.equal(f.state().outbox.length,0);assert.equal(f.state().inbox[0].status,'rejected');
   await f.ingest(f.incoming(1));assert.equal(f.state().inbox.length,1);assert.equal(f.state().outbox.length,0);assert.deepEqual(await f.call('list','--all'),[]);
+});
+
+const responseDecision=(response,fields={})=>({decision:'query',summary:'已核对当前任务',response,...fields});
+
+test('structured response records multiline presentation with the immutable route and legacy adapter shape',async t=>{
+ const f=await fixture(t);await f.grant();await f.ingest(f.incoming());const message=(await f.next()).messages[0];
+ const response={template:'detail',title:'资料进展',lead:'正文已核对。\n附件待确认。',sections:[{title:'下一步',items:['确认附件范围']}],links:[{label:'资料',url:'https://example.com/report'}]};
+ const d=responseDecision(response);await f.record(message,d);
+ const queued=f.state().outbox.at(-1);
+ assert.deepEqual(queued.document.response,response);assert.equal(queued.route.format,'card');assert.equal(queued.reply_to,'message-1');assert.equal(queued.reply_in_thread,true);
+ for(const key of ['columns','rows','details'])assert.ok(Array.isArray(queued.document[key]));
+ assert.equal((await f.record(message,d)).duplicate,true);assert.equal(f.state().outbox.length,2);
+ await f.expire();const recovered=(await f.next('recovery')).messages[0];assert.equal(recovered.mode,'ack');assert.deepEqual(recovered.decision.response,response);await f.ack(recovered);
+ await f.call('deliver','--consumer','sender');const sent=lines(path.join(f.external,'effects.jsonl')).at(-1);
+ assert.equal(sent.format,'card');assert.equal(sent.reply_to,'message-1');assert.equal(sent.destination.id,'chat-one');assert.deepEqual(sent.body,renderResponse(response,'card'));
+ assert.deepEqual(await f.call('queue'),[]);assert.deepEqual(await f.call('list','--all'),[]);
+});
+
+test('response and reply are mutually exclusive while summaries stay single-line and validation is atomic',async t=>{
+ const f=await fixture(t);await f.grant();await f.ingest(f.incoming());const message=(await f.next()).messages[0];
+ const response={template:'ack',lead:'收到，我先核对。'};
+ const invalid=[
+  {...decision(),response},
+  {decision:'query',summary:'已核对'},
+  responseDecision(response,{summary:'第一行\n第二行'}),
+  responseDecision({...response,destination:'other-chat'}),
+  responseDecision({...response,format_override:{format:'text'}}),
+  responseDecision({...response,format_override:{format:'text',authorization_ref:'unrelated-message'}}),
+  responseDecision({...response,lead:'第一行\n第二行'})
+ ];
+ const before=f.state();for(const d of invalid)await assert.rejects(f.record(message,d));
+ assert.deepEqual(f.state(),before);assert.deepEqual(await f.call('list','--all'),[]);
+ await f.record(message,responseDecision(response));assert.deepEqual(f.state().inbox[0].decision.response,response);
+});
+
+test('response can exceed the old 16 KiB decision bound but enforces the new UTF-8 response and file bounds',async t=>{
+ const f=await fixture(t);await f.grant();await f.ingest(f.incoming());const message=(await f.next()).messages[0];
+ const response={template:'detail',lead:'已核对内容',sections:[{title:'核对结果',items:Array.from({length:20},()=> 'x'.repeat(900))}]};
+ const d=responseDecision(response), bytes=Buffer.byteLength(JSON.stringify(d));assert.ok(bytes>16*1024&&bytes<24*1024);
+ const largeFile=f.file(d);fs.appendFileSync(largeFile,' '.repeat(64*1024));
+ await assert.rejects(f.call('message-record',message.id,'--token',message.token,'--decision-file',largeFile));
+ await assert.rejects(f.record(message,responseDecision({...response,sections:[{title:'核对结果',items:Array.from({length:20},()=> '字'.repeat(900))}]})));
+ assert.equal(f.state().outbox.length,1);assert.equal(f.state().inbox[0].decision,null);
+ await f.record(message,d);assert.equal(f.state().outbox.length,2);assert.deepEqual(f.state().inbox[0].decision.response,response);
+});
+
+test('ack and explicit format override persist wire format without rewriting grant, route or subsequent replies',async t=>{
+ const f=await fixture(t);await f.grant();
+ const responses=[
+  {template:'ack',lead:'收到。'},
+  {template:'detail',lead:'按要求用纯文本回复。',format_override:{format:'text',authorization_ref:'message-2'}},
+  {template:'detail',lead:'后续仍采用原配置格式。'}
+ ];
+ const expected=['text','text','card'];
+ for(const [i,response] of responses.entries()){
+  await f.ingest(f.incoming(i+1));const message=(await f.next()).messages[0];await f.record(message,responseDecision(response));await f.ack(message);
+  const queued=f.state().outbox.at(-1);assert.equal(queued.route.format,'card');
+  await f.call('deliver','--consumer','sender');const delivered=f.state().outbox.find(row=>row.id===queued.id), effect=lines(path.join(f.external,'effects.jsonl')).at(-1);
+  assert.equal(delivered.wire_format,expected[i]);assert.equal(effect.format,expected[i]);assert.deepEqual(effect.body,renderResponse(response,expected[i]));assert.equal(delivered.route.format,'card');assert.equal(effect.reply_to,'message-'+(i+1));assert.equal(effect.destination.id,'chat-one');
+ }
+ assert.equal(f.state().grants[0].format,'card');
+});
+
+
+test('escaped render growth is rejected before committing a task, decision or reply',async t=>{
+ const f=await fixture(t);await f.grant({allow_new:true,format:'markdown'});await f.ingest(f.incoming());const message=(await f.next()).messages[0];
+ const response={template:'detail',lead:'Output needs review',sections:[{title:'Details',items:Array.from({length:20},()=> '*'.repeat(900))}]};
+ assert.ok(Buffer.byteLength(JSON.stringify(response))<24*1024);
+ assert.ok(Buffer.byteLength(JSON.stringify(renderResponse(response,'markdown')))>28000);
+ const d={...createDecision(),response};delete d.reply;const before=f.state();
+ await assert.rejects(f.record(message,d),/render.*bounds/i);
+ assert.deepEqual(f.state(),before);assert.deepEqual(await f.call('list','--all'),[]);assert.deepEqual(await f.call('queue'),[]);
+ assert.equal(await f.call('lookup','--source',message.source,'--source-ref',message.source_ref),null);
 });

@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {taskDocument,userStatus,uiTime} from '../scripts/presentation.mjs';
+import {taskDocument,taskResponseDocument,userStatus,uiTime} from '../scripts/presentation.mjs';
 import {render_list,render_task} from '../scripts/taskctl.mjs';
 import {createConnector} from '../scripts/connectors/feishu.mjs';
 import {sendResult} from '../scripts/connectors/contract.mjs';
+import {renderResponse} from '../scripts/reply-presentation.mjs';
 const fixture=JSON.parse(fs.readFileSync(new URL('./fixtures/python-schema1/tasks/task-legacy/task.json',import.meta.url),'utf8'));
 const config={stale_hours:24};
 const template=name=>fs.readFileSync(new URL('../ui/'+name,import.meta.url),'utf8');
@@ -47,4 +48,61 @@ test('failed cards preserve the outcome reason and useful next action despite an
  assert.match(detail.details.join('\n'),/下一步：修正格式后重新提交/);
  const list=taskDocument([task],'zh',false);
  assert.match(list.rows[0][2],/请求格式校验失败/);
+});
+
+
+test('structured task-list projection keeps legacy rows and makes the twenty-item limit explicit',()=>{
+ for(const count of [0,1,21]){
+  const tasks=Array.from({length:count},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'Reviewed summary',blocker:'',checks:[],results:[]}));
+  const doc=taskResponseDocument(tasks,'en',false);
+  assert.equal(doc.rows.length,count);assert.equal(doc.response.template,'list');assert.equal(doc.response.items.length,Math.min(count,20));
+  assert.deepEqual(doc.response.coverage,{shown:Math.min(count,20),total:count});
+ }
+});
+
+test('oversized task projections explicitly mark clipped content and preserve accurate item coverage',()=>{
+ const tasks=Array.from({length:20},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'字'.repeat(2000),blocker:'',checks:[],results:[]}));
+ const doc=taskResponseDocument(tasks,'en',false);
+ assert.equal(doc.rows.length,20);assert.ok(doc.response.items.length>0&&doc.response.items.length<20);
+ assert.deepEqual(doc.response.coverage,{shown:doc.response.items.length,total:20});
+ assert.ok(doc.response.items.every(item=>item.summary.includes('partial; inspect task details')));
+ assert.ok(Buffer.byteLength(JSON.stringify(doc.response))<=24*1024);
+});
+
+test('structured detail preserves blockers, current failed checks, next action and safe result links',()=>{
+ const task={...fixture,title:'Release materials',summary:'An older summary',status:'blocked',blocker:'Confirm scope',next_action:'Choose the target version',
+  checks:[{name:'Old failure',outcome:'fail',evidence:'Stale',work_revision:fixture.work_revision-1},...Array.from({length:4},(_,i)=>({name:'Current check '+i,outcome:'fail',evidence:'Required evidence '+i,work_revision:fixture.work_revision}))],
+  results:[{label:'Verified document',url:'https://example.com/report'},{label:'Unsafe link',url:'javascript:alert(1)'}]};
+ const doc=taskResponseDocument([task],'en'),response=doc.response, sections=JSON.stringify(response.sections);
+ assert.equal(response.template,'detail');assert.deepEqual(doc.columns,[]);assert.deepEqual(doc.rows,[]);
+ assert.match(sections,/Confirm scope/);assert.match(sections,/Choose the target version/);assert.match(sections,/Current check 0/);assert.doesNotMatch(sections,/Old failure/);
+ assert.match(sections,/More failed checks omitted/);assert.match(sections,/1 result links omitted/);
+ assert.deepEqual(response.links,[{label:'Verified document',url:'https://example.com/report'}]);
+ const completed=taskResponseDocument([{...task,status:'completed',blocker:'',checks:[],completion:{at:'2026-10-05T01:02:03Z',summary:'Actual verified outcome'}}],'en');
+ assert.equal(completed.response.lead,'Actual verified outcome');
+});
+
+
+test('blank task summaries preserve their list item and omit only the optional empty field',()=>{
+ const task={...fixture,title:'Empty summary task',status:'queued',summary:'',next_action:'',blocker:'',events:[],checks:[],results:[]};
+ const response=taskResponseDocument([task],'en',false).response;
+ assert.equal(response.items.length,1);assert.equal(response.items[0].title,task.title);assert.equal(response.items[0].summary,undefined);
+ assert.deepEqual(response.coverage,{shown:1,total:1});
+});
+
+
+test('task-list render expansion stays bounded with explicit coverage in every format',()=>{
+ const tasks=Array.from({length:20},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'*'.repeat(900),blocker:'',checks:[],results:[]}));
+ const response=taskResponseDocument(tasks,'en',false).response;
+ assert.ok(response.items.length>0&&response.items.length<20);assert.deepEqual(response.coverage,{shown:response.items.length,total:20});
+ for(const format of ['text','markdown','card'])assert.ok(Buffer.byteLength(JSON.stringify(renderResponse(response,format)))<=28000);
+});
+
+test('automatic clipping of supplementary characters never leaves malformed Unicode',()=>{
+ const task={...fixture,title:'🚀'.repeat(100),summary:'🚀'.repeat(800),blocker:'',checks:[],results:[]};
+ const list=taskResponseDocument([task],'en',false).response,detail=taskResponseDocument([task],'en',true).response;
+ for(const response of [list,detail]){
+  const walk=value=>{if(typeof value==='string')assert.ok(value.isWellFormed());else if(value&&typeof value==='object')Object.values(value).forEach(walk);};walk(response);
+ }
+ assert.match(list.items[0].summary,/partial/);assert.match(detail.title,/partial/);
 });

@@ -1,3 +1,4 @@
+import {renderResponse} from '../reply-presentation.mjs';
 import {uiTime} from '../presentation.mjs';
 /** Calls the actual feishu-message-server CLI, never the platform directly. */
 import fs from 'node:fs';
@@ -33,6 +34,7 @@ export function createConnector(settings) {
     });
   }
   const render = (format, doc) => {
+    if (doc.response) return renderResponse(doc.response, format);
     if (format === 'text' || format === 'markdown') return renderText(doc, format === 'markdown');
     if (format !== 'card') throw new ConnectorError('Unsupported format');
     const plain = text => ({tag: 'div', text: {tag: 'plain_text', content: String(text)}});

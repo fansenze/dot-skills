@@ -1,3 +1,4 @@
+import {validateResponse, responseDocument, responseFormat, renderResponse} from './reply-presentation.mjs';
 /** Durable, scoped handoff to an active agent. No language parser or executor. */
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -124,12 +125,16 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
   }
   function parseDecision(file) {
     let d;
-    try { if(fs.statSync(file).size>16384) throw new Error(); d=JSON.parse(fs.readFileSync(file,'utf8')); }
-    catch { fail('Decision must be a readable JSON object within 16 KiB'); }
-    const fields=['decision','summary','reply','task_id','title','goal','next_action','authorization_ref','work_revision'];
+    try { if(fs.statSync(file).size>65536) throw new Error(); d=JSON.parse(fs.readFileSync(file,'utf8')); }
+    catch { fail('Decision must be a readable JSON object within 64 KiB'); }
+    const fields=['decision','summary','reply','response','task_id','title','goal','next_action','authorization_ref','work_revision'];
     if(!d || typeof d!=='object' || Array.isArray(d) || Object.keys(d).some(k=>!fields.includes(k))) fail('Unsupported decision fields');
     if(!['query','clarify','reject','create','continue'].includes(d.decision)) fail('Unsupported message decision');
-    for(const k of ['summary','reply']) requireText(d[k],k,k==='reply'?4000:1000);
+    requireText(d.summary,'summary',1000);
+    if(d.response !== undefined) {
+      if(d.reply !== undefined) fail('Use response or legacy reply, not both');
+      d.response = validateResponse(d.response);
+    } else requireText(d.reply,'reply',4000);
     for(const k of ['title','goal','next_action','authorization_ref','task_id']) if(d[k]!==undefined) requireText(d[k],k,k==='goal'?4000:1000);
     if(d.decision==='create') {
       for(const k of ['title','goal','next_action','authorization_ref']) requireText(d[k],k,k==='goal'?4000:1000);
@@ -151,6 +156,8 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
         return {id:r.id,task_id:r.task_id??null,decision:r.decision,duplicate:true};
       }
       if(!active(data,r)) fail('Message grant or connector is disabled');
+      if(d.response?.format_override && ![r.id,r.envelope.message_id].includes(d.response.format_override.authorization_ref)) fail('Format override must reference this incoming message');
+      if(d.response) { const format=responseFormat({response:d.response},g.format,c.capabilities); if(Buffer.byteLength(JSON.stringify(renderResponse(d.response,format)))>28000) fail('Response render exceeds delivery bounds; shorten content or provide explicit partial coverage'); }
       if(!['clarify','reject'].includes(d.decision) && !g.commands.includes(d.decision)) fail('Decision exceeds inbound grant');
       if(d.decision==='create' && !g.allow_new) fail('New task creation is not authorized');
       let task;
@@ -162,7 +169,7 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
       if(d.decision==='create' && scheduler.execute({command:'lookup',source:'connector-'+r.connector,source_ref:r.id})) fail('Message source already belongs to a task; inspect and reconcile before creating');
       if(d.decision==='create') task=makeTask({id:'task-'+r.id.slice(0,32),title:d.title,goal:d.goal,next_action:d.next_action,summary:d.summary,source:'connector-'+r.connector,status:'queued',blocker:''});
       r.decision=structuredClone(d); r.task_id=task?.id??null; r.status='recorded'; r.recorded_at=stamp();
-      enqueue(data,'message:'+r.id,routeFor(c,g),{title:task?.title ?? '任务回复',updated_at:stamp(),columns:[],rows:[],details:[...(task ? ['ID: '+task.id] : []),d.reply]},r.task_id,g.reply_mode==='reply'?r.envelope.message_id:null, g.reply_mode==='reply');
+      enqueue(data,'message:'+r.id,routeFor(c,g),d.response ? responseDocument(d.response,stamp()) : {title:task?.title ?? '任务回复',updated_at:stamp(),columns:[],rows:[],details:[...(task ? ['ID: '+task.id] : []),d.reply]},r.task_id,g.reply_mode==='reply'?r.envelope.message_id:null, g.reply_mode==='reply');
       // Combine the task's existing watch policies with the inbox transaction,
       // instead of clobbering either integration snapshot in Store.save.
       if(d.decision==='create') {

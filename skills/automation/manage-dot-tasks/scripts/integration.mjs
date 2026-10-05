@@ -1,5 +1,6 @@
+import {responseDocument, responseFormat} from './reply-presentation.mjs';
 import {validateHandshakes, expireHandshakes, handshakeCommand, matchHandshake} from './identity-handshake.mjs';
-import {taskDocument as document} from './presentation.mjs';
+import {taskResponseDocument as document} from './presentation.mjs';
 /** Transactional notifications and explicitly authorized agent/command intake. */
 import {createMessageInbox, agentMessage, grantCovers, messageText, messageEnvelope, validateMessages, validateContextGrants, requestFailureDocument} from './message-inbox.mjs';
 import fs from 'node:fs';
@@ -65,6 +66,7 @@ export function readIntegration(store) {
     if (['claimed', 'sending'].includes(n.state) && !n.lease) throw new ConnectorError('Notification lease missing');
     const c = data.connections.find(c => c.id === n.route.connector_id), p = policies.find(p => p.id === n.route.policy_id);
     if (!p || p.connector !== c.id || digest(n.route) !== digest(routeFor(c, p)) || n.id !== 'notice-' + digest([n.event_id, n.route]).slice(0, 40)) throw new ConnectorError('Notification route integrity failed');
+    if (n.wire_format !== undefined && (!c.capabilities.formats.includes(n.wire_format) || n.wire_format !== responseFormat(n.document,n.route.format,c.capabilities))) throw new ConnectorError('Notification wire format integrity failed');
     if (n.reply_in_thread !== undefined && (typeof n.reply_in_thread !== 'boolean' || !n.reply_to)) throw new ConnectorError('Invalid reply options');
     if (n.attempts < 0 || !Number.isFinite(Date.parse(n.available_at)) || (n.lease && !Number.isFinite(Date.parse(n.lease.until)))) throw new ConnectorError('Invalid notification recovery state');
   }
@@ -185,11 +187,13 @@ export function createIntegration({store, scheduler, makeTask}) {
       if (changed) save(data); return selected ?? null;
     });
   }
-  async function begin(noticeId, token, body) {
+  async function begin(noticeId, token, body, format) {
     return locked(() => {
       const data = readIntegration(store), n = getLease(data, noticeId, token);
       if (n.state !== 'claimed' || !policyActive(data, n)) throw new ConnectorError('Notification is not authorized for a new send');
       if (n.wire_body !== undefined && digest(n.wire_body) !== digest(body)) throw new ConnectorError('Retry payload must remain identical');
+      if (n.wire_format !== undefined && n.wire_format !== format) throw new ConnectorError('Retry format must remain identical');
+      n.wire_format = format;
       n.wire_body = structuredClone(body); n.intent = {at: stamp(), attempt: n.attempts}; n.state = 'sending'; n.receipt = null;
       save(data); return structuredClone(n);
     });
@@ -215,21 +219,22 @@ export function createIntegration({store, scheduler, makeTask}) {
     const consumer = id(args.consumer), limit = count(args.limit, 10, 100), leaseMs = count(args.lease_ms, 120000, 3600000), sent = [];
     for (let i = 0; i < limit; i++) {
       const n = await claim(consumer, leaseMs); if (!n) break;
-      let adapter, body;
+      let adapter, body, format;
       try {
         const c = await locked(() => readIntegration(store).connections.find(c => c.id === n.route.connector_id));
         ({adapter} = await bounded(() => loadConnector(c), 15000));
-        body = n.wire_body ?? adapter.render(n.route.format, structuredClone(n.document));
+        format = n.wire_format ?? responseFormat(n.document, n.route.format, c.capabilities);
+        body = n.wire_body ?? adapter.render(format, structuredClone(n.document));
         if (body === undefined || Buffer.byteLength(JSON.stringify(body)) > 28000) throw new ConnectorError('Notification render exceeds bounds');
       } catch {
         await record(n.id, n.lease.token, {status: 'not_sent', idempotency_key: n.key, retryable: false, error_code: 'adapter-preflight-failed'});
         sent.push(await ack(n.id, n.lease.token)); continue;
       }
-      const intent = await begin(n.id, n.lease.token, body);
+      const intent = await begin(n.id, n.lease.token, body, format);
       let result;
       try {
         result = await bounded(signal => adapter[intent.reply_to ? 'reply' : 'send']({account_id: intent.route.account_id,
-          destination: intent.route.destination, format: intent.route.format, body: intent.wire_body,
+          destination: intent.route.destination, format: intent.wire_format ?? intent.route.format, body: intent.wire_body,
           reply_to: intent.reply_to, ...(intent.reply_in_thread !== undefined ? {reply_in_thread:intent.reply_in_thread} : {}), idempotency_key: intent.key}, {signal}));
       } catch { result = null; }
       await record(n.id, n.lease.token, result); sent.push(await ack(n.id, n.lease.token));
@@ -303,7 +308,7 @@ export function createIntegration({store, scheduler, makeTask}) {
           }
           Object.assign(entry, {mode:'agent', grant_id:grant.id, binding:currentConnection.binding, envelope:messageEnvelope(e), status:'pending', reason:'awaiting-agent', lease:null, decision:null});
           const zh = (grant.language ?? 'zh') === 'zh';
-          enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant), {title:zh?'收到':'Received',updated_at:stamp(),columns:[],rows:[],details:[zh?'已收到，正在排队处理。':'Received; your request is queued for review.']}, null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
+          enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant), responseDocument({template:'ack',lead:zh?'收到，正在处理。':'Received; I am reviewing your request.'},stamp()), null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
           save(data); return;
         }
         if (command.task_id && !store.index().some(t => t.id === command.task_id)) { entry.reason = 'unknown-task'; save(data); return; }

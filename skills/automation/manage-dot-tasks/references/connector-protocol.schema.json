@@ -88,6 +88,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "response": {
+          "$ref": "#/$defs/response"
         }
       },
       "additionalProperties": false
@@ -395,6 +398,344 @@
         }
       },
       "additionalProperties": false
+    },
+    "response_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^https?://[^\\s<>]+$",
+      "format": "uri",
+      "description": "HTTP(S) URL without embedded credentials. Runtime URL parsing additionally rejects credentials and invalid hosts."
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "template",
+        "lead"
+      ],
+      "properties": {
+        "template": {
+          "enum": [
+            "ack",
+            "list",
+            "detail",
+            "decision",
+            "brief"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069\\u0009\\u000a\\u000d]+$"
+        },
+        "lead": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "title"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "status": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "blocker": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "next_action": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "url": {
+                "$ref": "#/$defs/response_url"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sections": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "items"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "items": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "url"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "url": {
+                "$ref": "#/$defs/response_url"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "description"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "data_time": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{3})?(?:Z|[+-]\\d\\d:\\d\\d)$",
+          "description": "Runtime checks calendar validity and rejects normalized impossible dates."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+        },
+        "coverage": {
+          "type": "object",
+          "required": [
+            "shown",
+            "total"
+          ],
+          "properties": {
+            "shown": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        "format_override": {
+          "type": "object",
+          "required": [
+            "format",
+            "authorization_ref"
+          ],
+          "properties": {
+            "format": {
+              "$ref": "#/$defs/format"
+            },
+            "authorization_ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069\\u0009\\u000a\\u000d]+$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "description": "Plain-content presentation. Serialized response is at most 24576 UTF-8 bytes; selected rendered JSON is at most 28000 bytes. Runtime validates byte limits, coverage.shown equals items.length, coverage.total >= shown, supported format, and format authorization reference equals the current incoming message or scoped claim ID.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "ack"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "template": {
+                "enum": [
+                  "ack",
+                  "list",
+                  "detail",
+                  "decision",
+                  "brief"
+                ]
+              },
+              "lead": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069\\u0009\\u000a\\u000d]+$"
+              },
+              "format_override": {
+                "type": "object",
+                "required": [
+                  "format",
+                  "authorization_ref"
+                ],
+                "properties": {
+                  "format": {
+                    "$ref": "#/$defs/format"
+                  },
+                  "authorization_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069\\u0009\\u000a\\u000d]+$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "list"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "items",
+              "coverage"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "decision"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "options"
+            ],
+            "properties": {
+              "options": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label",
+                    "description"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160,
+                      "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000,
+                      "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069]+$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "const": "brief"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "data_time",
+              "source"
+            ]
+          }
+        }
+      ]
     }
   }
 }

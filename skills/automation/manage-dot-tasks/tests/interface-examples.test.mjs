@@ -8,6 +8,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {run, parse_args} from '../scripts/taskctl.mjs';
 import {createConnector} from '../scripts/connectors/feishu.mjs';
 import {capabilities, sendResult} from '../scripts/connectors/contract.mjs';
+import {responseDocument} from '../scripts/reply-presentation.mjs';
 const ROOT=fileURLToPath(new URL('..',import.meta.url));
 const json=p=>JSON.parse(fs.readFileSync(p,'utf8'));
 const schema=json(path.join(ROOT,'references/connector-protocol.schema.json'));
@@ -18,7 +19,8 @@ function validate(value, definition) {
   if(definition.type) { const actual=value===null?'null':Array.isArray(value)?'array':Number.isInteger(value)?'integer':typeof value;
     assert.ok([].concat(definition.type).includes(actual),JSON.stringify({value,type:definition.type})); }
   if(typeof value==='string') { if(definition.minLength) assert.ok(value.length>=definition.minLength); if(definition.maxLength) assert.ok(value.length<=definition.maxLength); if(definition.pattern) assert.match(value,new RegExp(definition.pattern)); }
-  if(Array.isArray(value)) { if(definition.maxItems) assert.ok(value.length<=definition.maxItems);value.forEach(v=>validate(v,definition.items)); }
+  if(typeof value==='number') { if(definition.minimum!==undefined) assert.ok(value>=definition.minimum); if(definition.maximum!==undefined) assert.ok(value<=definition.maximum); }
+  if(Array.isArray(value)) { if(definition.minItems!==undefined) assert.ok(value.length>=definition.minItems); if(definition.maxItems) assert.ok(value.length<=definition.maxItems);value.forEach(v=>validate(v,definition.items)); }
   if(value&&typeof value==='object'&&!Array.isArray(value)) {
     for(const key of definition.required??[]) assert.ok(Object.hasOwn(value,key),key);
     if(definition.additionalProperties===false) for(const key of Object.keys(value)) assert.ok(key in definition.properties,key);
@@ -78,4 +80,22 @@ test('documented receive-only transcript queues run and verify without rendering
   assert.equal(integration.connections[0].capabilities.send,false);assert.equal(integration.connections[0].capabilities.reply,false);
   assert.deepEqual(scheduler.requests.map(r=>r.spec.action),['execute','verify']);
   assert.equal(integration.outbox.length,0);assert.ok(!fs.existsSync(path.join(tmp,'calls.jsonl')));
+});
+
+
+test('document schema supports all response templates and still rejects unknown semantic fields',()=>{
+ const responses=[
+  {template:'ack',lead:'Received.'},
+  {template:'list',lead:'No tasks in scope.',items:[],coverage:{shown:0,total:0}},
+  {template:'detail',lead:'First line.\nSecond line.',sections:[{title:'Next',items:['Confirm scope']}],links:[{label:'Document',url:'https://example.com/report'}]},
+  {template:'decision',lead:'Which scope?',options:[{label:'Current release',description:'Use the approved changes'}]},
+  {template:'brief',lead:'Scope is still pending.',data_time:'2026-10-05T01:02:03Z',source:'Authorized ledger'}
+ ];
+ for(const response of responses){
+  const doc=responseDocument(response,'2026-10-05T01:02:03Z');validate(doc,schema.$defs.document);
+  assert.throws(()=>validate({...doc,response:{...response,unrecognized:true}},schema.$defs.document));
+ }
+ for(const response of [{template:'ack',lead:'Received.',title:'Forbidden title'},{template:'decision',lead:'Choose',options:[]},{template:'brief',lead:'Summary'}]){
+  assert.throws(()=>validate(response,schema.$defs.response));
+ }
 });

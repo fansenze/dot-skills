@@ -1,3 +1,4 @@
+import {renderResponse} from '../reply-presentation.mjs';
 import {uiTime} from '../presentation.mjs';
 /** Versioned task/server connector boundary. Modules are explicitly trusted code. */
 import fs from 'node:fs';
@@ -59,6 +60,7 @@ export async function bounded(operation, timeout = 75000) {
 }
 const escape = s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replace(/([\\`*_{}\[\]()#!|>~])/g, '\\$1');
 export function renderText(document, markdown = false) {
+  if (document.response) return renderResponse(document.response, markdown ? 'markdown' : 'text');
   const safe = markdown ? escape : String;
   return [safe(document.title)+' · '+safe(uiTime(document.updated_at)), ...document.rows.map(row => row.map(safe).join(' · ')), ...document.details.map(safe)].filter(Boolean).join('\n');
 }
