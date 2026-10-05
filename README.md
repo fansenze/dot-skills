@@ -27,7 +27,8 @@ This prompt selects **dot for both the Feishu service and task management**. You
 My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer. (This file contains no secret keys, tokens, or other credentials.)
 Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills.
 In my private chat with the bot, let me manage my existing and new dot/Codex tasks
-through natural language. Send an initial overview and completion notifications there.
+through natural language. Send an initial overview of up to 10 recently updated active tasks
+and completion notifications there. Do not scan all task history during startup.
 
 Follow my instructions exactly and execute promptly. Do not speculate about my config,
 run content checks on it, or add unrelated checks or actions.
@@ -41,7 +42,7 @@ If you explicitly want **the Feishu service on your connected computer**, say so
 
 Once dot confirms the connection and your private chat, send ordinary messages such as “What are my tasks?”, “Start a new task to compare these options,” or “Continue the README task.” Dot reports completion results in that chat. The workflow runs while dot is active; it cannot wake an inactive dot.
 
-For **new tasks only**, replace the two lines about task scope and updates in the startup prompt with:
+For **new tasks only**, replace the lines about task scope and updates in the startup prompt with:
 
 ```text
 In my private chat with the bot, accept ordinary messages to create and continue new tasks,
