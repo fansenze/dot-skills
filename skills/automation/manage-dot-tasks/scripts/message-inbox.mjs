@@ -105,6 +105,7 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
         const taskConversation=conversationContext(store,r);
         const bindings=scheduler.read().bindings.filter(b=>grantCovers(data,g,b.task_id));
         messages.push({id:r.id, token:r.lease.token, lease_until:r.lease.until, mode:r.decision?'ack':'interpret',
+          ...(!r.decision ? {prompt:fs.readFileSync(new URL('../references/reply-style.md',import.meta.url),'utf8').trimEnd()+'\n\n## User message\n\n'+r.envelope.text} : {}),
           acknowledgement:receipt ? {id:receipt.id,state:receipt.state,attempts:receipt.attempts,receipt:receipt.receipt} : null,
           envelope:structuredClone(r.envelope), grant:structuredClone(g), source:'connector-'+r.connector, source_ref:r.id,
           task_id:r.task_id ?? null, decision:r.decision ?? null,

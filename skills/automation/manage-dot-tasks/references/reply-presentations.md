@@ -2,6 +2,8 @@
 
 Structured responses are a presentation layer for agent-mode `message-record` decisions and built-in task notifications. Legacy decision `reply` remains supported. They do not create a new command mode, infer task intent, schedule a message, authorize a tool action, or change the sender, destination, reply anchor, grant or watch. Dot chooses the template after reviewing the authenticated request and scoped facts. The transport remains a renderer and sender.
 
+Before drafting, `start` and `message-next` include an assembled `prompt` on each `mode: interpret` claim: [reply style and template references](reply-style.md), followed by the original user message. This is input preparation only; dot's subsequent output handling, rendering and delivery remain unchanged. Recorded `mode: ack` claims omit the drafting prompt and reuse their saved decision.
+
 Use plain content in the user's language. Put meaningful line breaks in the content rather than flattening an answer into one long sentence. Do not supply raw Markdown, HTML, Feishu markup, provider card JSON, mentions or action payloads. Characters that resemble markup are rendered as content: text replaces angle brackets with visible literal angle characters to prevent provider mention syntax while preserving ampersands and verified URLs, Markdown escapes formatting syntax, and cards use native plain-text fields. Verified HTTP(S) result links become native link buttons in cards; they do not execute options or task actions.
 
 ## Choose a template
