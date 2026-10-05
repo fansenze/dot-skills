@@ -9,7 +9,7 @@ Follow the [ordered configuration and startup workflow](../SKILL.md#configuratio
 - Values supplied during the interaction: pass them through standard input to `prepare --stdin-json` to write a temporary JSON file.
 - Partial existing file: `prepare --config FILE --stdin-json` merges the additional values into a temporary file.
 
-Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. Run the protected resident `start` workflow with that path only when startup is in the user’s requested scope and the required capability has been separately approved/provisioned; reuse a matching running instance. See [resident service](resident.md) for the service directory and lifecycle contract. Setup and configuration alone do not imply startup, persistent credential storage, or notification subscriptions. If keys are missing, ask only for those keys and continue already authorized steps after preparation. The source file is not overwritten.
+Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. Run the resident `start` workflow with that path when startup is in the user’s requested scope; reuse a matching running instance. No separate local access token is needed. See [resident service](resident.md) for the service directory and lifecycle contract. Setup and configuration alone do not imply startup, persistent credential storage, or notification subscriptions. If keys are missing, ask only for those keys and continue already authorized steps after preparation. The source file is not overwritten.
 
 The supported fields are `app_id`, `app_secret`, `brand`, and `bot_open_id`. The first two are required. The default brand is `feishu`. Newly generated configurations contain only the supported fields that are needed; the default brand can be omitted.
 
@@ -74,17 +74,17 @@ After a requested send, report success only for API code 0 with a returned messa
 | `init` | Validate input and create a local configuration file |
 | `prepare` | Copy or generate a temporary configuration file and return its path |
 | `check` | Check for missing configuration |
-| `start` | Explicitly start the protected resident service and its long connection, or reuse the healthy selected matching instance; require a pre-provisioned capability file. `--standalone` selects the direct listener explicitly |
+| `start` | Explicitly start the resident service and its long connection, or reuse the healthy selected matching instance; create a missing private resident directory. `--standalone` selects the direct listener explicitly |
 | `inbox` | Read local SQLite inbox records; explicit `--resident-dir` routes the read through that resident |
 | `send` / `reply` | Reuse the selected resident SDK client and durable operation journal to send the explicit text/Markdown/card format; `--standalone` opts into a separate one-shot client |
 | `capabilities` / `identity` | Default local mode declares protocol/formats without credentials or inspects app ID/brand without networking; explicit `--resident-dir` queries the selected resident |
-| `health` | Query the selected resident with capability and matching config/account/runtime pins; inspect receiver readiness separately |
+| `health` | Query the selected resident with matching config/account/runtime pins; inspect receiver readiness separately |
 | `inbox-page` | Read an ordered, restart-safe page locally, or via an explicitly selected resident; see [interface](interface.md) |
 | `test` | Run simulated tests, including a local loopback HTTP fixture |
 | `validate` | Check skill metadata, dependency versions, and portable files |
 | `package` | Create an archive from a fixed file manifest |
 
-`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. Within the Feishu CLI, the only other external network operation is `setup` downloading dependencies. Remote configuration uses remote-config-bridge operation batches through actual task tools; the configuration stays on its computer. Code distribution may independently require supported file transfer. The resident exposes only a capability-protected loopback TCP control interface with a fixed operation allowlist. It is not an external API, arbitrary command runner, or permission to send messages. Unix-domain socket binding is unavailable in the actual dot environment (`EPERM`); do not claim Unix-socket support there or broaden the bind address to work around it.
+`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. Within the Feishu CLI, the only other external network operation is `setup` downloading dependencies. Remote configuration uses remote-config-bridge operation batches through actual task tools; the configuration stays on its computer. Code distribution may independently require supported file transfer. The resident exposes only a loopback TCP control interface for trusted local callers with a fixed operation allowlist. It is not an external API, arbitrary command runner, or permission to send messages. Unix-domain socket binding is unavailable in the actual dot environment (`EPERM`); do not claim Unix-socket support there or broaden the bind address to work around it.
 
 ## Feishu app settings
 
@@ -107,10 +107,9 @@ The app must be available to the intended user, and the bot must be available in
 | `.local/messages.sqlite3` | Inbox records and deduplication data |
 | `.local/server.log` | Connection, received-message, duplicate, and ignored-event statuses |
 | `.local/node-listener.lock/pid` | PID of the current receiver instance |
-| `STATE_DIR/resident/endpoint.json` | Protected loopback endpoint, nonsecret account/runtime identity and current instance |
+| `STATE_DIR/resident/endpoint.json` | Loopback endpoint, nonsecret account/runtime identity and current instance; private mode-0600 file |
 | `STATE_DIR/resident/resident.lock/pid` | Exclusive resident owner PID; no automatic stale-lock takeover |
 | `STATE_DIR/resident/receipts/` | Durable hashed-key dispatch intents and results; preserve unknown outcomes across restarts |
-| `RESIDENT_DIR/capability` or explicit `--capability-file` | Existing local access credential, regular mode 0600 inside a private mode-0700 directory; never generated or printed by the runtime |
 | `dist/feishu-message-server-node.tgz` | Portable archive |
 
 Logs omit configuration values and message bodies. Use `inbox --show-text` to inspect content. Logs rotate at approximately 2 MiB and retain two backups.
@@ -139,7 +138,7 @@ Authentication and message API calls share one HTTP instance with a fixed **30,0
 | A configuration file already exists | Reuse the selected configuration, or apply the user's requested update |
 | An instance lock or resident endpoint exists | Verify process, health, account and pinned runtime before reuse. Do not automatically replace it or start another instance |
 | Resident missing, unhealthy, or identity mismatch | Report the precise resident-selection blocker. Do not start/restart, change accounts, or switch to standalone implicitly |
-| Capability missing or unsafe file permissions | Stop local service access; obtain approved provisioning or user action. Never generate a credential or expose its contents |
+| Unsafe runtime file permissions | Check the selected service user's ownership and private directory/file permissions; preserve the existing state |
 | Resident operation is in flight or unknown | Retain its original key and journal; reconcile without automatic redispatch or standalone bypass |
 | Not ready within 45 seconds | Check app settings, brand, configuration, and network access |
 | `99991672` | Identify the denied operation. For optional target lookup, offer an exact ID or first-inbound discovery without extra permissions. For a requested receive/send operation, explain its relevant missing permission; change permissions only when authorized |

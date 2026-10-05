@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { SafeError } from './config.mjs';
 import { findProject } from './project.mjs';
 import { fileURLToPath } from 'node:url';
@@ -32,24 +32,18 @@ export function runtimeIdentity() {
   const project = findProject();
   return hash(fs.readFileSync(project.lockfile) + '\0' + fs.readFileSync(path.join(directory, '../package.json')) + '\0' + fs.readdirSync(directory).filter(n => n.endsWith('.mjs')).sort().map(n => n + '\0' + fs.readFileSync(path.join(directory, n))).join('\0'));
 }
-function capability(file) {
-  const value = readPrivate(file).trim();
-  if (!/^[A-Za-z0-9_-]{32,256}$/.test(value)) throw fail('invalid-local-capability');
-  return value;
-}
 function same(a, b) { return a && b && a.app_id === b.app_id && a.brand === b.brand && a.runtime === b.runtime; }
-export async function residentRequest({directory, capabilityFile = path.join(directory, 'capability'), identity, operation, args = {}, timeout = 65000}) {
+export async function residentRequest({directory, identity, operation, args = {}, timeout = 65000}) {
   let endpoint;
   try { endpoint = JSON.parse(readPrivate(path.join(directory, 'endpoint.json'))); }
   catch { throw fail('resident-unavailable-no-fallback'); }
   if (endpoint.protocol !== 1 || !Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535 || !same(endpoint.identity, identity)) throw fail('resident-binding-mismatch');
-  const token = capability(capabilityFile);
   // Fixed loopback destination; native HTTP deliberately never consults proxy env.
   // Provider HTTP retains createNetwork's original proxy/TLS policy.
   const body = JSON.stringify({operation, args, identity, instance: endpoint.instance});
   return new Promise((resolve, reject) => {
     const req = http.request({host: '127.0.0.1', port: endpoint.port, path: '/v1', method: 'POST', agent: false,
-      headers: {'content-type': 'application/json', authorization: `Bearer ${token}`, 'content-length': Buffer.byteLength(body)}}, res => {
+      headers: {'content-type': 'application/json', 'content-length': Buffer.byteLength(body)}}, res => {
       res.on('aborted', () => reject(fail('resident-delivery-unknown-no-fallback')));
       res.on('error', () => reject(fail('resident-delivery-unknown-no-fallback')));
       const chunks = []; let size = 0; res.on('data', chunk => { size += chunk.length; if (size > 4 * 1024 * 1024) req.destroy(); else chunks.push(chunk); });
@@ -61,9 +55,9 @@ export async function residentRequest({directory, capabilityFile = path.join(dir
   });
 }
 
-export async function startResident({directory, capabilityFile = path.join(directory, 'capability'), identity, handler, signal}) {
+export async function startResident({directory, identity, handler, signal}) {
+  fs.mkdirSync(directory, {mode: 0o700, recursive: true});
   privatePath(directory, true);
-  const token = capability(capabilityFile);
   const receipts = path.join(directory, 'receipts');
   fs.mkdirSync(receipts, {mode: 0o700, recursive: true}); privatePath(receipts, true);
   const lock = path.join(directory, 'resident.lock');
@@ -107,10 +101,9 @@ export async function startResident({directory, capabilityFile = path.join(direc
   }
   const server = http.createServer(async (req, res) => {
     const respond = (status, value) => { if (!res.destroyed) { res.writeHead(status, {'content-type': 'application/json', 'connection': 'close'}); res.end(JSON.stringify(value)); } };
-    const auth = req.headers.authorization ?? '';
-    const expected = `Bearer ${token}`;
-    if (req.method !== 'POST' || req.url !== '/v1' || req.headers.origin || req.headers['content-type'] !== 'application/json' ||
-        Buffer.byteLength(auth) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(auth), Buffer.from(expected))) { req.resume(); respond(403, {error: 'resident-unauthorized'}); return; }
+    if (req.method !== 'POST' || req.url !== '/v1' || req.headers.origin || req.headers['content-type'] !== 'application/json') {
+      req.resume(); respond(403, {error: 'resident-request-rejected'}); return;
+    }
     try {
       const chunks = []; let size = 0; for await (const part of req) { size += part.length; if (size > 100000) throw fail('request-too-large'); chunks.push(part); }
       respond(200, await dispatch(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(Buffer.concat(chunks)))));

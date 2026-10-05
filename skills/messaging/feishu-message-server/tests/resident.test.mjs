@@ -4,15 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import {spawn, spawnSync} from 'node:child_process';
+import {execFile, spawn, spawnSync} from 'node:child_process';
 import {once} from 'node:events';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {performance} from 'node:perf_hooks';
+import {promisify} from 'node:util';
 import {startResident, residentRequest, runtimeIdentity} from '../scripts/resident.mjs';
 import {findProject} from '../scripts/project.mjs';
 
-// These public constants are fixtures, not generated service credentials.
-const TOKEN = 'synthetic_resident_capability_fixture_only_00000000';
 const IDENTITY = () => ({app_id: 'cli_resident_fixture_only', brand: 'feishu', runtime: runtimeIdentity()});
 const FIXTURE = fileURLToPath(new URL('./fixtures/resident-process.mjs', import.meta.url));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -28,7 +27,6 @@ function onCleanup(t, cleanup) {
 function temporary(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'resident-fixture-'));
   fs.chmodSync(directory, 0o700);
-  fs.writeFileSync(path.join(directory, 'capability'), TOKEN, {mode: 0o600});
   onCleanup(t, () => fs.rmSync(directory, {recursive: true, force: true}));
   return directory;
 }
@@ -101,7 +99,7 @@ async function raw(directory, body, options = {}) {
   const data = options.rawBody ?? JSON.stringify({identity: endpoint.identity, instance: endpoint.instance, operation: 'health', args: {}, ...body});
   return new Promise((resolve, reject) => {
     const req = http.request({host: '127.0.0.1', port: endpoint.port, method: options.method ?? 'POST', path: options.path ?? '/v1',
-      headers: {'content-type': 'application/json', authorization: `Bearer ${TOKEN}`, 'content-length': Buffer.byteLength(data), ...options.headers}}, res => {
+      headers: {'content-type': 'application/json', 'content-length': Buffer.byteLength(data), ...options.headers}}, res => {
       let response = ''; res.on('data', chunk => {response += chunk;});
       res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(response)}));
     });
@@ -117,24 +115,54 @@ async function localResident(t, directory, handler = async () => ({ok: true})) {
 }
 const sendArgs = key => ({receiveId: 'oc_synthetic_fixture', text: 'Synthetic loopback message', idempotencyKey: key});
 
-for (const [name, mutate] of [
-  ['directory readable by other users', directory => fs.chmodSync(directory, 0o755)],
-  ['capability readable by other users', directory => fs.chmodSync(path.join(directory, 'capability'), 0o644)],
-  ['capability symlink', directory => {fs.renameSync(path.join(directory, 'capability'), path.join(directory, 'actual')); fs.symlinkSync('actual', path.join(directory, 'capability'));}],
-  ['malformed capability', directory => fs.writeFileSync(path.join(directory, 'capability'), 'short')]
-]) test(`resident refuses ${name} before publishing an endpoint`, async t => {
-  const directory = temporary(t); mutate(directory);
-  await assert.rejects(startResident({directory, identity: IDENTITY(), handler: () => {throw new Error('Must not dispatch');}}), /unsafe-local-permissions|invalid-local-capability/);
+test('resident creates its directory and accepts local clients without provisioning an access token', async t => {
+  const directory = path.join(temporary(t), 'state', 'resident');
+  await localResident(t, directory);
+  assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
+  assert.deepEqual(fs.readdirSync(directory).sort(), ['endpoint.json', 'receipts', 'resident.lock']);
+  assert.deepEqual(await residentRequest({directory, identity: IDENTITY(), operation: 'health'}), {ok: true});
+  assert.deepEqual(await raw(directory, {}), {status: 200, data: {ok: true}});
+});
+
+test('CLI reuses a resident for health, send and reply with only the selected config and state', async t => {
+  const root = temporary(t), stateDir = path.join(root, 'state'), directory = path.join(stateDir, 'resident');
+  const configFile = path.join(root, 'config.json');
+  fs.writeFileSync(configFile, JSON.stringify({app_id: IDENTITY().app_id, app_secret: 'synthetic-cli-secret-only'}), {mode: 0o600});
+  const dispatched = [];
+  await localResident(t, directory, async (operation, args) => {
+    dispatched.push({operation, args});
+    return operation === 'health' ? {ok: true, receiver_connected: true, state_dir: stateDir, identity: IDENTITY()}
+      : {ok: true, message_id: 'om_cli_fixture'};
+  });
+  const cli = promisify(execFile), server = fileURLToPath(new URL('../scripts/server.mjs', import.meta.url));
+  for (const [command, args] of [
+    ['start', []], ['health', []],
+    ['send', ['--receive-id', 'oc_synthetic_fixture', '--text', 'Synthetic CLI message', '--idempotency-key', 'cli_send']],
+    ['reply', ['--message-id', 'om_cli_fixture', '--text', 'Synthetic CLI reply', '--idempotency-key', 'cli_reply']]
+  ]) {
+    const {stdout} = await cli(process.execPath, ['--disable-warning=ExperimentalWarning', server, command,
+      '--config', configFile, '--state-dir', stateDir, ...args], {env: cleanEnvironment(), timeout: 10000});
+    const result = JSON.parse(stdout);
+    assert.equal(result.ok, true);
+    if (command === 'start') assert.equal(result.reused, true);
+  }
+  assert.deepEqual(dispatched.map(value => value.operation), ['health', 'health', 'send', 'reply']);
+  assert.equal(dispatched[2].args.body, 'Synthetic CLI message');
+  assert.equal(dispatched[3].args.messageId, 'om_cli_fixture');
+});
+
+test('resident refuses a directory readable by other users before publishing an endpoint', async t => {
+  const directory = temporary(t); fs.chmodSync(directory, 0o755);
+  await assert.rejects(localResident(t, directory), /unsafe-local-permissions/);
   assert.equal(fs.existsSync(path.join(directory, 'endpoint.json')), false);
   assert.equal(fs.existsSync(path.join(directory, 'resident.lock')), false);
 });
 
-test('actual loopback resident validates auth, identity, runtime, instance, JSON and fixed operation allowlist', async t => {
+test('actual loopback resident validates request shape, identity, runtime, instance, JSON and fixed operation allowlist', async t => {
   const directory = temporary(t); let dispatched = 0;
   await localResident(t, directory, async () => {dispatched++; return {ok: true};});
   for (const options of [
-    {headers: {authorization: `Bearer ${'x'.repeat(TOKEN.length)}`}},
-    {headers: {authorization: ''}}, {headers: {origin: 'https://attacker.invalid'}},
+    {headers: {origin: 'https://attacker.invalid'}},
     {headers: {'content-type': 'text/plain'}}, {method: 'GET'}, {path: '/arbitrary'}
   ]) assert.equal((await raw(directory, {}, options)).status, 403);
   for (const body of [
@@ -289,11 +317,9 @@ test('unsafe receipts directory is rejected before acquiring the resident lock',
   assert.equal(fs.existsSync(path.join(directory, 'endpoint.json')), false);
 });
 
-test('large malformed requests and multibyte wrong auth are rejected without dispatch', async t => {
+test('oversized requests are rejected without dispatch', async t => {
   const directory = temporary(t); let dispatched = 0;
   await localResident(t, directory, async () => {dispatched++; return {ok: true};});
-  const badAuth = await raw(directory, {}, {headers: {authorization: `Bearer ${'é'.repeat(TOKEN.length)}`}});
-  assert.equal(badAuth.status, 403);
   const oversized = await raw(directory, {args: {text: 'x'.repeat(100001)}});
   assert.equal(oversized.status, 400); assert.equal(oversized.data.error, 'request-too-large');
   assert.equal(dispatched, 0);
