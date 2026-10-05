@@ -1,3 +1,4 @@
+import {validateHandshakes, expireHandshakes, handshakeCommand, matchHandshake} from './identity-handshake.mjs';
 import {taskDocument as document} from './presentation.mjs';
 /** Transactional notifications and explicitly authorized agent/command intake. */
 import {createMessageInbox, agentMessage, grantCovers, messageText, messageEnvelope, validateMessages, validateContextGrants, requestFailureDocument} from './message-inbox.mjs';
@@ -7,6 +8,8 @@ import crypto from 'node:crypto';
 import { digest, loadConnector, sendResult, bounded, requireText, ConnectorError } from './connectors/contract.mjs';
 
 export const INTEGRATION_OPTIONS = {
+  'handshake-begin': ['id','connector','account','brand','authorization-ref','grant-id','commands','tasks','allow-new','updates','watch-id','initial','tenant','sender','destination','ttl-ms','format','reply-mode','language'],
+  'handshake-status': [], 'handshake-cancel': [],
   connect: ['id', 'module', 'settings-file'], connections: [], disconnect: [],
   watch: ['id', 'connector', 'account', 'destination', 'destination-type', 'format', 'events', 'tasks', 'language', 'initial'],
   unwatch: [], 'allow-inbound': ['id', 'connector', 'account', 'tenant', 'sender', 'destination', 'commands', 'tasks', 'since', 'format', 'reply-mode', 'language', 'context-from', 'mode', 'allow-new', 'updates'],
@@ -16,11 +19,11 @@ export const INTEGRATION_OPTIONS = {
   'retry-notice': ['reason'], 'resolve-notice': ['status', 'message-id', 'evidence'],
   start: ['consumer', 'timeout-ms', 'lease-ms', 'limit'],
 };
-export const INTEGRATION_IDS = ['disconnect', 'unwatch', 'deny-inbound', 'retry-notice', 'resolve-notice', 'message-renew', 'message-record', 'message-ack', 'message-fail', 'request-failure'];
+export const INTEGRATION_IDS = ['handshake-status', 'handshake-cancel', 'disconnect', 'unwatch', 'deny-inbound', 'retry-notice', 'resolve-notice', 'message-renew', 'message-record', 'message-ack', 'message-fail', 'request-failure'];
 const EVENTS = ['registered', 'progress', 'blocked', 'failed', 'completed', 'verification', 'result', 'execution'];
 const FINAL = new Set(['api_accepted', 'api_error', 'delivery_unknown', 'dead', 'cancelled']);
 const STATES = ['pending', 'claimed', 'sending', 'recorded', ...FINAL];
-const empty = () => ({schema_version: 1, connections: [], watches: [], grants: [], outbox: [], inbox: [], checkpoints: []});
+const empty = () => ({schema_version: 1, connections: [], watches: [], grants: [], outbox: [], inbox: [], checkpoints: [], handshakes: []});
 const encode = value => JSON.stringify(value, null, 2) + '\n';
 const stamp = () => new Date().toISOString();
 const id = value => { if (typeof value !== 'string' || !/^[a-z][a-z0-9-]{2,63}$/.test(value)) throw new ConnectorError('Invalid integration ID'); return value; };
@@ -65,6 +68,7 @@ export function readIntegration(store) {
     if (n.reply_in_thread !== undefined && (typeof n.reply_in_thread !== 'boolean' || !n.reply_to)) throw new ConnectorError('Invalid reply options');
     if (n.attempts < 0 || !Number.isFinite(Date.parse(n.available_at)) || (n.lease && !Number.isFinite(Date.parse(n.lease.until)))) throw new ConnectorError('Invalid notification recovery state');
   }
+  validateHandshakes(data);
   validateMessages(data);
   return data;
 }
@@ -246,7 +250,8 @@ export function createIntegration({store, scheduler, makeTask}) {
     const snapshot = await locked(() => {
       const data = readIntegration(store), c = data.connections.find(c => c.id === args.connector && c.enabled);
       if (!c) throw new ConnectorError('Unknown or disabled connector');
-      if (!data.grants.some(g => g.connector === c.id && g.enabled)) return null;
+      if (expireHandshakes(data)) save(data);
+      if (!data.grants.some(g => g.connector === c.id && g.enabled) && !data.handshakes.some(h => h.connector === c.id && h.state === 'pending')) return null;
       if (!c.capabilities.receive || !c.capabilities.durable_cursor) throw new ConnectorError('Connector lacks durable receive capability');
       return {c, cursor: data.checkpoints.find(p => p.id === c.id)?.cursor ?? null};
     });
@@ -282,6 +287,12 @@ export function createIntegration({store, scheduler, makeTask}) {
         const entry = {id: messageKey, event_key: eventKey, connector: snapshot.c.id, status: 'rejected', reason: 'not-authorized-or-not-a-command'};
         data.inbox.push(entry);
         const currentConnection = data.connections.find(c => c.id === snapshot.c.id);
+        const handshake = matchHandshake(data, currentConnection, e, page.events);
+        if (handshake) {
+          Object.assign(entry, {reason:handshake.reason, ...(handshake.setup_id ? {setup_id:handshake.setup_id,status:'accepted'} : {})});
+          if (handshake.watch && handshake.initial) enqueue(data, 'initial:' + handshake.watch.id, routeFor(currentConnection,handshake.watch), document(store.all().filter(t=>covers(handshake.watch.tasks,t.id)),handshake.watch.language,false));
+          save(data); return;
+        }
         if (!grant || !currentConnection.enabled || currentConnection.binding !== snapshot.c.binding) { save(data); return; }
         if (grant.mode === 'agent') {
           if(!messageText(e)){
@@ -368,6 +379,7 @@ export function createIntegration({store, scheduler, makeTask}) {
     }
     return locked(() => {
       const data = readIntegration(store), cmd = args.command;
+      if (cmd.startsWith('handshake-')) { const result = handshakeCommand(data,args); save(data); return result; }
       if (cmd === 'connections') return data.connections;
       if(cmd==='request-failure'){
         const r=data.inbox.find(r=>r.id===args.id);

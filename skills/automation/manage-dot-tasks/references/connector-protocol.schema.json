@@ -342,6 +342,30 @@
           "maxLength": 256,
           "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
           "description": "Optional exact provider envelope context; not identity or authorization evidence."
+        },
+        "brand": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "chat_type": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "sender_type": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "native_text": {
+          "type": "string",
+          "maxLength": 8000
+        },
+        "provider_app_id": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "provider_event_id": {
+          "type": "string",
+          "maxLength": 256
         }
       },
       "additionalProperties": false

@@ -74,3 +74,19 @@ test('reply thread option survives job replay and cannot be supplied to a send o
  await assert.rejects(enqueue(cloud,{...input,payload:{...input.payload,reply_in_thread:false}}),/mismatch/);
  const invalid=send('invalid','other-key');invalid.payload.reply_in_thread=true;await assert.rejects(enqueue(cloud,invalid));
 });
+
+test('bridge preserves native private-handshake provenance without classifying or granting it', async t => {
+ const {cloud,worker}=await fixture(t);
+ const {createConnector}=await import('../scripts/adapter.mjs');
+ const adapter=createConnector({store:cloud.root,authorization_ref:'fixture'});
+ const controller=new AbortController();t.after(()=>controller.abort());
+ const pending=adapter.receive({signal:controller.signal});
+ const m={app_id:'fixture-app',provider_app_id:'fixture-app',provider_event_id:'fixture-event',brand:'feishu',chat_type:'p2p',sender_type:'user',tenant_key:'fixture-tenant',sender_tenant_key:'fixture-tenant',sender_open_id:'fixture-sender',chat_id:'fixture-chat',event_id:'fixture-event',message_id:'fixture-message',message_type:'text',text:'dot-bind:'+'a'.repeat(64),bot_mention_keys:[],received_at:1700000000,message_created_ms:'1700000000000'};
+ let batch;for(let i=0;i<100;i++){batch=await exportBatch(cloud);if(batch.jobs.length)break;await new Promise(r=>setTimeout(r,10));}
+ assert.equal(batch.jobs.length,1);
+ const receipts=await processBatch(worker,batch,async()=>({protocol_version:1,messages:[{cursor:'native-cursor',message:m}],next_cursor:'native-cursor',has_more:false}));
+ await importReceipts(cloud,receipts);const result=await pending,e=result.events[0];
+ for(const key of ['provider_app_id','provider_event_id','brand','chat_type','sender_type'])assert.equal(e[key],m[key]);
+ assert.equal(e.native_text,m.text);assert.equal(e.text,m.text);assert.equal(e.occurred_at,'2023-11-14T22:13:20.000Z');
+ assert.equal(Object.hasOwn(e,'grant_id'),false);
+});

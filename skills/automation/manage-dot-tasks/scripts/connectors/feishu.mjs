@@ -67,7 +67,7 @@ export function createConnector(settings) {
       return {next_cursor: page.next_cursor, has_more: page.has_more, events: page.messages.map(({cursor, message: m}) => {
         let text = m.text;
         for (const key of m.bot_mention_keys ?? []) if (typeof text === 'string') text = text.replace(key, '').trim();
-        return {cursor, ...replyContext(m), event_id: m.event_id, message_id: m.message_id, account_id: m.app_id, tenant_id: m.tenant_key,
+        return {cursor, ...replyContext(m), ...Object.fromEntries(['brand','chat_type','sender_type','provider_app_id','provider_event_id'].filter(k=>typeof m[k]==='string').map(k=>[k,m[k]])), ...(m.message_type==='text' && !(m.bot_mention_keys?.length) && typeof m.text==='string' ? {native_text:m.text} : {}), event_id: m.event_id, message_id: m.message_id, account_id: m.app_id, tenant_id: m.tenant_key,
           sender_tenant_id: m.sender_tenant_key, sender_id: m.sender_open_id, destination_id: m.chat_id,
           type: m.message_type, ...(m.text_source ? {text_source:m.text_source} : {}), ...(m.text_omitted ? {text_omitted:true} : {}), received_at: new Date(m.received_at * 1000).toISOString(),
           occurred_at: /^\d{13}$/.test(m.message_created_ms) ? new Date(Number(m.message_created_ms)).toISOString() : null, text};

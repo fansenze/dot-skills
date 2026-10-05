@@ -12,7 +12,7 @@ export const FILES = Object.freeze([
   'package.json', 'scripts/project.mjs', 'scripts/config.mjs', 'scripts/messages.mjs', 'scripts/content.mjs',
   'scripts/transport.mjs', 'scripts/runtime.mjs', 'scripts/server.mjs', 'scripts/formats.mjs',
   'scripts/package.mjs', 'scripts/validate.mjs', 'tests/server.test.mjs', 'tests/content.test.mjs',
-  'tests/transport.test.mjs', 'tests/lifecycle.test.mjs', 'tests/interfaces.test.mjs', 'references/operations.md', 'references/validation.md', 'references/interface.md', 'references/rich-text-and-threads.md', 'references/remote-configuration.md', 'tests/routing.test.mjs'
+  'tests/handshake-envelope.test.mjs', 'tests/transport.test.mjs', 'tests/lifecycle.test.mjs', 'tests/interfaces.test.mjs', 'references/operations.md', 'references/validation.md', 'references/interface.md', 'references/rich-text-and-threads.md', 'references/remote-configuration.md', 'tests/routing.test.mjs'
 ]);
 export const ARCHIVE_FILES = Object.freeze([...FILES, 'pnpm-lock.yaml']);
 

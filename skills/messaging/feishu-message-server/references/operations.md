@@ -37,7 +37,13 @@ Connection, message verification, and target resolution are separate facts. Insp
 
 The bundled CLI has no chat/contact lookup command. When an authorized official query is available separately, use the current app/platform and existing permissions; do not invent a CLI command. If a lookup returns HTTP 400 / `99991672`, report that lookup's missing permission, not an empty target list or a failed long connection. Do not automatically request broader permissions or repeat the same denied lookup. If the user explicitly chooses discovery via additional permissions, explain only the permission relevant to that endpoint. Receive and send permissions remain separate requirements.
 
-For first-inbound discovery:
+### Task-management identity handshake
+
+When starting Manage Dot Tasks, its pending setup replaces generic first-private-message discovery. In the trusted dot conversation, resolve and preregister the authorized task/notification scope with `taskctl handshake-begin`; then show its one-time `dot-bind:<64 lowercase hex characters>` challenge. Ask the user only to send that exact native text in the bot's private chat. No “sent” / “已发送” return message is required. Keep the task consumer active and inspect `handshake-status SETUP_ID`; a running receiver alone does not consume setup.
+
+The transport retains ordinary inbox evidence; task integration owns the hash-only setup state, exact-text `p2p` validation, expected account/brand/tenant/sender/destination constraints, issue/expiry checks, atomic single consumption and grant/watch creation. Do not infer identity from an arbitrary newest record, a post projection or content claims, and do not send an extra probe. Missing/conflicting evidence fails closed. Existing verified bindings are reused; disabled policies stay disabled. Setup creates no task and replays no historical messages. Any authorized initial overview is queued at most once and follows normal unknown-send reconciliation. Use the task skill's startup/connectors references for the full contract; no new Feishu server command or receiver-side authorization is needed.
+
+For standalone first-inbound discovery outside that task-management handshake:
 
 1. Inspect `bash feishu.sh inbox --limit 20` and record the baseline message IDs/times. For a custom listener state directory, add `--state-dir /path/to/instance-state` to this and subsequent inbox commands. Inbox reads are local and do not need configuration secrets. Increase `--limit` as needed (maximum 1000); a limited recent view is not the entire history.
 2. If both destinations are missing, say: "Please send the bot one private message and mention it once in the intended group. I can then check the new records to identify both destinations. You can also provide the exact IDs." If only one target is missing, ask only for that one. The group message must mention this bot; an ordinary group message is not stored by this receiver.

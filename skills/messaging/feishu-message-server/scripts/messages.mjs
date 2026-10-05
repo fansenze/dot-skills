@@ -119,7 +119,7 @@ export function extractMessage(payload, config) {
   const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? {});
   const contentV2 = message.content_v2 === undefined ? {} : {content_v2: typeof message.content_v2 === 'string' ? message.content_v2 : JSON.stringify(message.content_v2)};
   return {reason: 'accepted', message: {
-    app_id: config.app_id, tenant_key: typeof header.tenant_key === 'string' ? header.tenant_key : '',
+    app_id: config.app_id, provider_app_id: header.app_id ?? null, provider_event_id: header.event_id ?? null, brand: config.brand, sender_type: sender.sender_type ?? null, tenant_key: typeof header.tenant_key === 'string' ? header.tenant_key : '',
     event_id: nonempty(header.event_id) ? header.event_id : message.message_id, message_id: message.message_id,
     chat_id: message.chat_id ?? '', chat_type: message.chat_type, message_type: message.message_type ?? '',
     sender_open_id: senderId.open_id ?? null, sender_tenant_key: sender.tenant_key ?? null,
