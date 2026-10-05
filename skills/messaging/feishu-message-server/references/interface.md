@@ -1,6 +1,6 @@
 # Independent message-server interface (protocol 1)
 
-The server receives, durably stores, sends and replies. It has no task model, task executor, command authorization grants or notification retry loop. Manage Dot Tasks calls this interface through its adapter; other consumers can use it without adopting that skill. No HTTP/MCP service is required.
+The server receives, durably stores, sends and replies. It has no task model, task executor, command authorization grants or notification retry loop. Manage Dot Tasks calls this interface through its adapter; other consumers can use it without adopting that skill. The CLI normally reuses a protected, host-local resident service. No externally reachable HTTP/MCP service or arbitrary execution endpoint is provided; explicit `--standalone` preserves direct one-shot use.
 
 ## Capabilities and selection
 
@@ -10,9 +10,17 @@ bash feishu.sh check --config "$CONFIG_FILE"
 bash feishu.sh identity --config "$CONFIG_FILE"
 ```
 
-`capabilities` returns `{protocol_version:1,name:"feishu-message-server",formats:["text","markdown","card"],send:true,reply:true,receive:true,durable_cursor:true,delivery_receipts:"api_acceptance_only",automatic_retry:false}` without loading configuration or calling the network. `identity` loads only the selected configuration and returns app ID/brand, never its secret. It does not prove network readiness or recipient ownership. CLI JSON version 1 is additive; consumers reject unsupported major versions and unavailable capabilities. Dependencies must be installed before invoking the server CLI. Commands use the pinned runtime on the user's selected service host, with configuration readable there. Follow [service routing](remote-configuration.md): dot hosting stays direct with an existing local configuration or its verified Library copy; explicitly selected computer hosting uses the bridge. A source path never selects the service host.
+`capabilities` in its default local mode returns `{protocol_version:1,name:"feishu-message-server",formats:["text","markdown","card"],send:true,reply:true,receive:true,durable_cursor:true,delivery_receipts:"api_acceptance_only",automatic_retry:false}` without loading configuration or calling the network. `identity` loads only the selected configuration and returns app ID/brand, never its secret. It does not prove network readiness or recipient ownership. CLI JSON version 1 is additive; consumers reject unsupported major versions and unavailable capabilities. Dependencies must be installed before invoking the server CLI. Commands use the pinned runtime on the user's selected service host, with configuration readable there. Follow [service routing](remote-configuration.md): dot hosting stays direct with an existing local configuration or its verified Library copy; explicitly selected computer hosting uses the bridge. A source path never selects the service host.
 
-Installation, `setup`, `prepare`, `init`, capability inspection, sending and inbox inspection do not implicitly start the receiver. `init` persists only when the user requested that configuration write; `prepare` uses a private temporary file. Reuse an existing selected config when no preparation is needed. Start/reuse a matching receiver only within startup authorization. Runtime data/configuration stay outside exported code.
+Installation, `setup`, `prepare`, `init`, capability inspection, sending and inbox inspection do not implicitly start the receiver. `init` persists only when the user requested that configuration write; `prepare` uses a private temporary file. Reuse an existing selected config when no preparation is needed. Start/reuse a matching receiver only within startup authorization. Runtime data/configuration stay outside exported code. A local service connection is not evidence of a healthy Feishu WebSocket, and neither proves message acceptance.
+
+## Resident selection and protocol boundary
+
+`--resident-dir DIR` selects the resident service directory; its default is `STATE_DIR/resident`. Normal send/reply operations and `health` use the selected resident. For `capabilities`, `identity`, `inbox`, and `inbox-page`, the default remains local, credential-free or read-only inspection as applicable; an explicit `--resident-dir` routes them through the resident. Resident requests pin app ID/brand, runtime identity, and the current instance before dispatch. A stale endpoint, incompatible runtime, different account, or missing capability fails closed. Never choose another account, spawn a listener, or fall back to direct network sending automatically. Use `--standalone` only for an explicitly selected direct operation, or `--isolated` with explicit, distinct `--resident-dir` and `--state-dir` values for an explicitly separate instance.
+
+The local operation allowlist is exactly `health`, `identity`, `capabilities`, `inbox`, `inbox-page`, `send`, and `reply`. There is no shell command, code evaluation, arbitrary URL request, configuration replacement, credential export, or task-execution operation. Local access requires the selected, pre-provisioned `--capability-file` (default `RESIDENT_DIR/capability`) and private runtime permissions; capability possession does not replace user authorization for message content and destination. Read [resident service](resident.md) for the exact lifecycle and security contract.
+
+Normal resident sends reuse one SDK client, token cache and network pool. This removes per-command client initialization from the path; it does not establish live latency, availability, or performance improvements. The fixed 30-second per-request timeout and no-automatic-retry contract remain unchanged.
 
 ## Explicit formats and results
 
@@ -28,6 +36,8 @@ A success is `{ok:true,message_id:string,idempotency_key:string}` (API code zero
 
 Safe diagnostics may include numeric `code`, `http_status`, `elapsed_ms` and allowlisted `error_type`, `error_code`, `request_phase`. Never store raw exceptions, headers or body dumps. Fixed timeout is 30 seconds per authentication/message request. The server never retries internally. A consumer must preserve account/platform, exact destination/type, body, reply target/options and key on any authorized retry. The provider's dedup window is finite; no permanent exactly-once guarantee exists.
 
+The resident persists each key and operation fingerprint before dispatch, then persists its result. A repeated key with the same operation returns the recorded result without dispatching again; changing the account, target/type, format/body, or reply options under the same key is rejected. Concurrent requests for one key cannot initiate duplicate sends. An operation left in flight by a crash becomes conservatively unknown, and unknown outcomes remain blocked from automatic redispatch after restart. Preserve the journal and report uncertainty. An explicit standalone invocation bypasses this resident journal and must not be used to evade unknown-outcome protection.
+
 ## Durable inbox cursor
 
 ```bash
@@ -35,7 +45,7 @@ bash feishu.sh inbox-page --state-dir "$STATE_DIR" --limit 100 --show-text
 bash feishu.sh inbox-page --state-dir "$STATE_DIR" --cursor "$CURSOR" --limit 100 --show-text
 ```
 
-`inbox` is a recent-record UI, not a reliable event source. `inbox-page` opens `STATE_DIR/messages.sqlite3` read-only and returns:
+`inbox` is a recent-record UI, not a reliable event source. With no explicit resident selection, `inbox-page` opens `STATE_DIR/messages.sqlite3` read-only and returns:
 
 ```json
 {"protocol_version":1,"messages":[{"cursor":"opaque-after-this-message","message":{"app_id":"fixture-app","tenant_key":"fixture-tenant","event_id":"fixture-event","message_id":"fixture-message","chat_id":"fixture-chat","chat_type":"p2p","sender_open_id":"fixture-sender","sender_tenant_key":"fixture-tenant","message_type":"text","text":"/tasks list","content":"original-provider-content","bot_mention_keys":[],"received_at":1700000000}}],"next_cursor":"opaque-after-last-message","has_more":false}

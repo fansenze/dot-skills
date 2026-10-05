@@ -46,7 +46,7 @@ export function createConnector(settings) {
   };
   async function send(message, signal, reply = false) {
     if (message.account_id !== settings.account_id) return {status: 'not_sent', idempotency_key: message.idempotency_key, retryable: false, error_code: 'binding-mismatch'};
-    const args = [reply ? 'reply' : 'send', '--config', settings.config_ref, '--expected-app-id', settings.account_id, '--expected-brand', settings.brand,
+    const args = [reply ? 'reply' : 'send', '--config', settings.config_ref, '--state-dir', settings.state_dir, '--expected-app-id', settings.account_id, '--expected-brand', settings.brand,
       '--format', message.format, '--stdin', '--idempotency-key', message.idempotency_key];
     if (reply) {
       args.push('--message-id', requireText(message.reply_to, 'reply target'));

@@ -9,7 +9,7 @@ Follow the [ordered configuration and startup workflow](../SKILL.md#configuratio
 - Values supplied during the interaction: pass them through standard input to `prepare --stdin-json` to write a temporary JSON file.
 - Partial existing file: `prepare --config FILE --stdin-json` merges the additional values into a temporary file.
 
-Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. Run `start --config` with that path only when startup is in the user’s requested scope; reuse a matching running instance. Setup and configuration alone do not imply startup, persistent credential storage, or notification subscriptions. If keys are missing, ask only for those keys and continue already authorized steps after preparation. The source file is not overwritten.
+Success returns `{"ok":true,"config":"/path/to/temporary/config.yml"}`. Run the protected resident `start` workflow with that path only when startup is in the user’s requested scope and the required capability has been separately approved/provisioned; reuse a matching running instance. See [resident service](resident.md) for the service directory and lifecycle contract. Setup and configuration alone do not imply startup, persistent credential storage, or notification subscriptions. If keys are missing, ask only for those keys and continue already authorized steps after preparation. The source file is not overwritten.
 
 The supported fields are `app_id`, `app_secret`, `brand`, and `bot_open_id`. The first two are required. The default brand is `feishu`. Newly generated configurations contain only the supported fields that are needed; the default brand can be omitted.
 
@@ -74,16 +74,17 @@ After a requested send, report success only for API code 0 with a returned messa
 | `init` | Validate input and create a local configuration file |
 | `prepare` | Copy or generate a temporary configuration file and return its path |
 | `check` | Check for missing configuration |
-| `start` | Use the configuration with the selected platform's official APIs for app authentication, bot information, and WebSocket endpoint discovery, then establish a long connection |
-| `inbox` | Read local SQLite inbox records |
-| `send` / `reply` | Use the official SDK to send the explicit text/Markdown/card format to the selected chat or message |
-| `capabilities` / `identity` | Declare protocol/format support without credentials; inspect selected app ID/brand without a network request |
-| `inbox-page` | Read an ordered, restart-safe page with per-message and final cursors; see [interface](interface.md) |
+| `start` | Explicitly start the protected resident service and its long connection, or reuse the healthy selected matching instance; require a pre-provisioned capability file. `--standalone` selects the direct listener explicitly |
+| `inbox` | Read local SQLite inbox records; explicit `--resident-dir` routes the read through that resident |
+| `send` / `reply` | Reuse the selected resident SDK client and durable operation journal to send the explicit text/Markdown/card format; `--standalone` opts into a separate one-shot client |
+| `capabilities` / `identity` | Default local mode declares protocol/formats without credentials or inspects app ID/brand without networking; explicit `--resident-dir` queries the selected resident |
+| `health` | Query the selected resident with capability and matching config/account/runtime pins; inspect receiver readiness separately |
+| `inbox-page` | Read an ordered, restart-safe page locally, or via an explicitly selected resident; see [interface](interface.md) |
 | `test` | Run simulated tests, including a local loopback HTTP fixture |
 | `validate` | Check skill metadata, dependency versions, and portable files |
 | `package` | Create an archive from a fixed file manifest |
 
-`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. Within the Feishu CLI, the only other external network operation is `setup` downloading dependencies. Remote configuration uses remote-config-bridge operation batches through actual task tools; the configuration stays on its computer. Code distribution may independently require supported file transfer. The running server does not expose a local HTTP interface.
+`start`, `send`, and `reply` connect to the selected Feishu/Lark platform. Within the Feishu CLI, the only other external network operation is `setup` downloading dependencies. Remote configuration uses remote-config-bridge operation batches through actual task tools; the configuration stays on its computer. Code distribution may independently require supported file transfer. The resident exposes only a capability-protected loopback TCP control interface with a fixed operation allowlist. It is not an external API, arbitrary command runner, or permission to send messages. Unix-domain socket binding is unavailable in the actual dot environment (`EPERM`); do not claim Unix-socket support there or broaden the bind address to work around it.
 
 ## Feishu app settings
 
@@ -105,12 +106,16 @@ The app must be available to the intended user, and the bot must be available in
 | `feishu-message-server-*/config.yml` or `config.json` in the system temporary directory | Configuration for the current run |
 | `.local/messages.sqlite3` | Inbox records and deduplication data |
 | `.local/server.log` | Connection, received-message, duplicate, and ignored-event statuses |
-| `.local/node-listener.lock/pid` | PID of the current instance |
+| `.local/node-listener.lock/pid` | PID of the current receiver instance |
+| `STATE_DIR/resident/endpoint.json` | Protected loopback endpoint, nonsecret account/runtime identity and current instance |
+| `STATE_DIR/resident/resident.lock/pid` | Exclusive resident owner PID; no automatic stale-lock takeover |
+| `STATE_DIR/resident/receipts/` | Durable hashed-key dispatch intents and results; preserve unknown outcomes across restarts |
+| `RESIDENT_DIR/capability` or explicit `--capability-file` | Existing local access credential, regular mode 0600 inside a private mode-0700 directory; never generated or printed by the runtime |
 | `dist/feishu-message-server-node.tgz` | Portable archive |
 
 Logs omit configuration values and message bodies. Use `inbox --show-text` to inspect content. Logs rotate at approximately 2 MiB and retain two backups.
 
-`--state-dir` relocates the inbox, log, and lock together; use the same directory when inspecting an instance. Inbox records already retain destination IDs, chat type, sender, app/tenant context, and message evidence. Preserve this data for later verified reuse; storing a record does not automatically confirm who owns the chat. Keep confirmed mappings in the current conversation without creating another registry by default. If the user requests a separate persistent mapping, keep only the needed ID/type, app/platform context, user-confirmed label, and evidence reference in private runtime state (directory mode 0700, file mode 0600), outside tracked files and portable archives. Preserve existing mappings and clarify conflicting replacements. Do not put mappings into the configuration template or add unsupported config keys. Never ask the user to paste a configuration dump, app secret, or access token to identify a recipient.
+`--state-dir` relocates the inbox, log, and receiver lock together and sets the default resident directory to `STATE_DIR/resident`; `--resident-dir` explicitly selects a different resident directory. Keep the service directory, receiver state, account binding and pinned runtime paired when inspecting or reusing an instance. Preserve durable operation outcomes during maintenance and migration. Inbox records already retain destination IDs, chat type, sender, app/tenant context, and message evidence. Preserve this data for later verified reuse; storing a record does not automatically confirm who owns the chat. Keep confirmed mappings in the current conversation without creating another registry by default. If the user requests a separate persistent mapping, keep only the needed ID/type, app/platform context, user-confirmed label, and evidence reference in private runtime state (directory mode 0700, file mode 0600), outside tracked files and portable archives. Preserve existing mappings and clarify conflicting replacements. Do not put mappings into the configuration template or add unsupported config keys. Never ask the user to paste a configuration dump, app secret, or access token to identify a recipient.
 
 SQLite uses `synchronous=FULL`. The SDK acknowledges a received message only after storage commits. A storage failure stops the listener and records an error status for diagnosis. Compatible existing databases can be reused. The server only receives, stores, and sends messages; it does not automatically invoke other tasks.
 
@@ -124,7 +129,7 @@ REST and WebSocket connections share a ProxyAgent. Supported variables include `
 
 TLS certificate verification remains enabled. An organization CA can be supplied with Node's `NODE_EXTRA_CA_CERTS`. The wrapper disables dependency debug output and uses the SDK's public `agent` and `httpInstance` options. Environment variables configure proxies and the runtime; they are not used to discover app configuration automatically.
 
-Authentication and message API calls share one HTTP instance with a fixed **30,000 ms per-request timeout**. Token acquisition precedes a send/reply when the SDK has no cached token; each request gets its own 30 seconds. The total command duration can therefore exceed 30 seconds. No user-facing timeout setting or automatic extension is provided. The separate WebSocket handshake remains 15 seconds, SDK WebSocket endpoint discovery retains its explicit 15-second HTTP timeout, and listener readiness still waits up to 45 seconds.
+Authentication and message API calls share one HTTP instance with a fixed **30,000 ms per-request timeout**. The resident retains its SDK client, token cache and network pool across CLI calls. An explicit standalone send creates a separate client. Token acquisition precedes a send/reply when the selected client has no cached token; each request gets its own 30 seconds. The total command duration can therefore exceed 30 seconds. No user-facing timeout setting or automatic extension is provided. The separate WebSocket handshake remains 15 seconds, SDK WebSocket endpoint discovery retains its explicit 15-second HTTP timeout, and listener readiness still waits up to 45 seconds.
 
 ## Results and troubleshooting
 
@@ -132,7 +137,10 @@ Authentication and message API calls share one HTTP instance with a fixed **30,0
 | --- | --- |
 | Required configuration is missing | Ask only for the missing key names, then run `prepare` again |
 | A configuration file already exists | Reuse the selected configuration, or apply the user's requested update |
-| An instance lock exists | Check the current instance before starting another |
+| An instance lock or resident endpoint exists | Verify process, health, account and pinned runtime before reuse. Do not automatically replace it or start another instance |
+| Resident missing, unhealthy, or identity mismatch | Report the precise resident-selection blocker. Do not start/restart, change accounts, or switch to standalone implicitly |
+| Capability missing or unsafe file permissions | Stop local service access; obtain approved provisioning or user action. Never generate a credential or expose its contents |
+| Resident operation is in flight or unknown | Retain its original key and journal; reconcile without automatic redispatch or standalone bypass |
 | Not ready within 45 seconds | Check app settings, brand, configuration, and network access |
 | `99991672` | Identify the denied operation. For optional target lookup, offer an exact ID or first-inbound discovery without extra permissions. For a requested receive/send operation, explain its relevant missing permission; change permissions only when authorized |
 | Connected but no confirmed private/group destination | Report the unknown targets during startup and follow [target discovery](#target-discovery-after-startup) |
@@ -147,7 +155,7 @@ The SDK manages listener reconnection. Confirm readiness through `transport_conn
 
 ### Send timeouts and retries
 
-Inspect the sending command's result before changing the listener. Each send/reply command creates its own HTTP client/network; a listener can continue receiving while authentication or a message request from that command times out. Connection readiness and fresh inbox records describe the receive path only.
+Inspect the sending command's result before changing the listener. Normal send/reply commands reuse the resident HTTP client/network; an explicit standalone command creates its own. In either mode, a listener can continue receiving while authentication or a message request times out. Connection readiness and fresh inbox records describe the receive path only.
 
 Failure diagnostics expose a bounded set of fields:
 
@@ -167,7 +175,7 @@ For example, an illustrative authentication failure can return `status: not_sent
 
 Use the observed phase and code to inspect the sender's credentials, selected platform, proxy/network path, or API rejection as appropriate. Do not assume that a transport timeout means invalid credentials or missing permissions. Consider restarting only when the listener itself is disconnected, its process is abnormal, or it is demonstrably stuck; check its current lifecycle evidence first. Receiving normally while a send times out is evidence to continue investigating the send path. A later successful send after a restart does not by itself establish that restarting fixed the problem.
 
-There is no automatic send retry, timeout extension, or retry loop. When the user authorizes retrying the same operation, pass the original `--idempotency-key` and preserve the destination/ID type, exact text, and reply options. Changing the text (including adding a timestamp), destination, or reply operation creates a new message and requires a new key. If an interrupted tool result lost the key and delivery is uncertain, explain the duplicate risk and clarify before another send; do not silently treat it as a new operation. An approval failure before execution is a tool-level blocker, not a Feishu API error. Do not send extra test messages or restart an instance just to obtain a cleaner result.
+There is no automatic send retry, timeout extension, or retry loop. When the user authorizes retrying the same operation, preserve the original `--idempotency-key`, destination/ID type, exact text, and reply options. Resident calls with a previously recorded key return its durable result rather than initiating another network attempt; an uncertain operation stays unknown until separately reconciled. Do not switch to `--standalone`, remove the journal, or invent a fresh key to bypass that protection. For a genuinely authorized direct standalone retry, pass the original key unchanged. Changing the text (including adding a timestamp), destination, or reply operation creates a new message and requires a new key. If an interrupted tool result lost the key and delivery is uncertain, explain the duplicate risk and clarify before another send; do not silently treat it as a new operation. An approval failure before execution is a tool-level blocker, not a Feishu API error. Do not send extra test messages or restart an instance just to obtain a cleaner result.
 
 ## Packaging and migration
 

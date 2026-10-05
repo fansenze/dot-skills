@@ -1,4 +1,4 @@
 interface:
   display_name: "Feishu Message Server"
-  short_description: "Feishu text/post intake and authorized thread replies"
-  default_prompt: "Use $feishu-message-server on my selected service host. For dot hosting, transfer my selected computer-local configuration through the internal Library skill, verify its bytes on dot, and use that local copy. Use $remote-config-bridge only if I explicitly choose computer hosting."
+  short_description: "Resident Feishu intake and authorized thread replies"
+  default_prompt: "Use $feishu-message-server on my selected service host and reuse its matching protected resident service. For dot hosting, transfer my selected computer-local configuration through the internal Library skill, verify its bytes on dot, and use that local copy. Use $remote-config-bridge only if I explicitly choose computer hosting."

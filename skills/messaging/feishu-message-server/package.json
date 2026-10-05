@@ -19,6 +19,6 @@
   },
   "files": [
     "SKILL.md", "agents/", "config.example.yml", "feishu.sh",
-    "scripts/*.mjs", "tests/*.test.mjs", "references/"
+    "scripts/*.mjs", "tests/*.test.mjs", "tests/fixtures/", "references/"
   ]
 }

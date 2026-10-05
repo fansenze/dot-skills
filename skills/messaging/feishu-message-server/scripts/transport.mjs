@@ -54,7 +54,7 @@ export function createNetwork({signal} = {}) {
   if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw new SafeError('TLS verification must remain enabled');
   const cancellation = new AbortController();
   const requestSignal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
-  const agent = new ProxyAgent();
+  const agent = new ProxyAgent({keepAlive: true});
   const envProxy = agent.getProxyForUrl;
   agent.getProxyForUrl = (url, request) => {
     const parsed = new URL(url);
@@ -100,9 +100,24 @@ export function createNetwork({signal} = {}) {
 }
 
 export function createClient(config, network) {
-  return new lark.Client({appId: config.app_id, appSecret: config.app_secret,
-    domain: config.domain, appType: lark.AppType.SelfBuild,
+  // Per-client, memory-only cache; never mix equal app IDs on different domains.
+  const entries = new Map();
+  const cache = {
+    get(key) { const item = entries.get(key); if (item && (!item.expire || item.expire > Date.now())) return item.value; entries.delete(key); },
+    set(key, value, expire) { entries.set(key, {value, expire}); return true; },
+    remove(key) { return entries.delete(key); }
+  };
+  const client = new lark.Client({appId: config.app_id, appSecret: config.app_secret,
+    domain: config.domain, appType: lark.AppType.SelfBuild, cache,
     httpInstance: network.httpInstance, logger: silentLogger});
+  // Pinned SDK does not coalesce simultaneous cold/expired-token requests.
+  const acquire = client.tokenManager.getCustomTenantAccessToken.bind(client.tokenManager);
+  let acquiring;
+  client.tokenManager.getCustomTenantAccessToken = () => {
+    if (!acquiring) acquiring = Promise.resolve().then(acquire).finally(() => { acquiring = undefined; });
+    return acquiring;
+  };
+  return client;
 }
 
 export async function resolveBotIdentity(config, client, signal) {
