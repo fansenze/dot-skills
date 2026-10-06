@@ -11,8 +11,9 @@ Recommended first-use intent:
 ```text
 My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer. (This file contains no secret keys, tokens, or other credentials.)
 Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills.
-Let anyone manage my existing and new dot/Codex tasks through the bot
-using natural language, with completion notifications.
+Process every message this bot receives.
+Let received requests manage my existing and new dot/Codex tasks
+through natural language. Send completion notifications there.
 Notify me here in dot after successful startup.
 Do not scan all task history during startup.
 
