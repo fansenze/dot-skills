@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import {readIntegration} from './integration.mjs';
 import {grantCovers} from './message-inbox.mjs';
+import {grantForMessage} from './received-intake.mjs';
 import {digest, requireText, loadConnector, bounded, sendResult, ConnectorError} from './connectors/contract.mjs';
 import {responseDocument, validateResponse, renderResponse} from './reply-presentation.mjs';
 
@@ -45,7 +46,9 @@ const pin = (g,c) => digest({grant:g,connection:c.binding});
 function active(store,b) {
   if(!b?.enabled)fail('Task conversation is unbound or disabled');
   store.get(b.task_id);
-  const i=readIntegration(store),g=i.grants.find(g=>g.id===b.feishu.grant_id),c=i.connections.find(c=>c.id===g?.connector);
+  const i=readIntegration(store),policy=i.grants.find(g=>g.id===b.feishu.grant_id),evidence=i.inbox.find(r=>r.id===b.verification_ref);
+  if(policy?.all_senders && !evidence)fail('Task conversation origin is unavailable');
+  const g=grantForMessage(policy,evidence),c=i.connections.find(c=>c.id===g?.connector);
   if(!g?.enabled || !c?.enabled || !grantCovers(i,g,b.task_id) || pin(g,c)!==b.policy_pin)fail('Conversation authority changed or disabled; review before dispatch');
   return {g,c};
 }
@@ -53,18 +56,22 @@ function active(store,b) {
 export function conversationContext(store, entry) {
   const d=readConversations(store), refs=new Set([entry.envelope?.message_id,entry.envelope?.parent_id,entry.envelope?.root_id,entry.envelope?.thread_id].filter(Boolean));
   const matches=d.bindings.filter(b=>b.enabled&&b.feishu.grant_id===entry.grant_id && (refs.has(b.feishu.root_id)||d.deliveries.some(n=>n.task_id===b.task_id&&n.channel==='feishu'&&n.receipt?.status==='api_accepted'&&refs.has(n.receipt.message_id))));
-  const current=matches.filter(b=>{try{active(store,b);return true;}catch{return false;}});
+  const current=matches.filter(b=>{try{const {g}=active(store,b);return !g.all_senders || (entry.connector===g.connector && entry.envelope.account_id===g.account && entry.envelope.tenant_id===g.tenant && entry.envelope.sender_id===g.sender && entry.envelope.destination_id===g.destination);}catch{return false;}});
   return {total_matches:current.length,matches:current.slice(0,20).map(b=>{const questions=d.questions.filter(q=>q.task_id===b.task_id),messages=d.messages.filter(m=>m.task_id===b.task_id);return {task_id:b.task_id,root_id:b.feishu.root_id,questions:questions.slice(-20).map(({consumptions,...q})=>({...q,consumption_count:consumptions?.length??0})),total_questions:questions.length,messages:messages.slice(-20),total_messages:messages.length};}),coverage:'at most 20 tasks, last 20 questions/messages each; counts expose partial context; conversation-show retrieves one full task ledger'};
 }
 export function ownsConversationRoute(store, taskId, policy) {
   const b=readConversations(store).bindings.find(b=>b.id===taskId&&b.enabled&&b.channels.includes('feishu'));if(!b)return false;
-  try {const {g}=active(store,b);return g.connector===policy.connector && g.account===policy.account && g.destination===policy.destination && (policy.destination_type??'chat_id')==='chat_id';}catch{return false;}
+  try {const {g}=active(store,b);return g.connector===policy.connector && g.account===policy.account && g.destination===policy.destination && (!policy.all_senders || (g.tenant===policy.tenant && g.sender===policy.sender)) && (policy.destination_type??'chat_id')==='chat_id';}catch{return false;}
 }
 export function canonicalDecision(store, entry, decision, taskId) {
   const d=readConversations(store), matches=conversationContext(store,entry).matches;
   const b=d.bindings.find(b=>b.id===(taskId??(matches.length===1?matches[0].task_id:null))&&b.enabled);
   if(!b) {if(decision.canonical_message_id)fail('Canonical reply requires an active bound task');return false;}
-  active(store,b);
+  const {g}=active(store,b);
+  if(g.all_senders && (entry.connector!==g.connector || entry.envelope.account_id!==g.account || entry.envelope.tenant_id!==g.tenant || entry.envelope.sender_id!==g.sender || entry.envelope.destination_id!==g.destination)) {
+    if(decision.canonical_message_id)fail('Canonical reply belongs to another conversation');
+    return false;
+  }
   if(matches.length>1 || (matches.length===1&&matches[0].task_id!==b.id))fail('Ambiguous task conversation reply');
   const input=d.answers.find(a=>a.task_id===b.id&&a.channel==='feishu'&&a.evidence_ref===entry.id&&a.provider_message_id===entry.envelope.message_id);
   if(!input)fail('Record the reviewed task input with conversation-input before its canonical reply');
@@ -125,9 +132,11 @@ export function createConversations({store}) {
     for(const value of [...Object.values(v.dot),...Object.values(v.feishu)])identifier(value);
     for(const k of ['conversation_id','sender_id','root_id'])identifier(v.dot[k]);for(const k of ['grant_id','root_id'])identifier(v.feishu[k]);
     if(!Array.isArray(v.channels)||!v.channels.includes('feishu')||new Set(v.channels).size!==v.channels.length||v.channels.some(c=>!['dot','feishu'].includes(c)))fail('Explicit channel scope required');
-    const i=readIntegration(store),g=i.grants.find(g=>g.id===v.feishu.grant_id),c=i.connections.find(c=>c.id===g?.connector);
-    if(!g?.enabled||g.mode!=='agent'||!c?.enabled||!c.capabilities.reply||!grantCovers(i,g,id))fail('An enabled scoped agent grant and reply connector are required');
-    const evidence=i.inbox.find(r=>r.id===v.verification_ref&&r.grant_id===g.id&&r.binding===c.binding&&r.task_id===id&&r.decision&&['recorded','done'].includes(r.status));
+    const i=readIntegration(store),policy=i.grants.find(g=>g.id===v.feishu.grant_id),c=i.connections.find(c=>c.id===policy?.connector);
+    if(!policy?.enabled||policy.mode!=='agent'||!c?.enabled||!c.capabilities.reply)fail('An enabled scoped agent grant and reply connector are required');
+    const evidence=i.inbox.find(r=>r.id===v.verification_ref&&r.grant_id===policy.id&&r.binding===c.binding&&r.task_id===id&&r.decision&&['recorded','done'].includes(r.status));
+    const g=grantForMessage(policy,evidence);
+    if(!grantCovers(i,g,id))fail('An enabled scoped agent grant and reply connector are required');
     if(!evidence || (evidence.envelope.root_id??evidence.envelope.message_id)!==v.feishu.root_id)fail('Binding root requires recorded task-associated inbox provenance');
     if(i.outbox.some(n=>n.route.account_id===g.account&&n.route.destination.id===g.destination&&(n.task_id===id||n.event_id==='received:'+evidence.id)&&!['api_accepted','cancelled'].includes(n.state)))fail('Settle legacy task replies before binding; uncertain sends require reconciliation');
     const b={id,task_id:id,...v,policy_pin:pin(g,c),enabled:true};const prior=d.bindings.find(x=>x.id===id);

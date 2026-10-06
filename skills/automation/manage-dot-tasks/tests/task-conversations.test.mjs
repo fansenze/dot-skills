@@ -30,14 +30,14 @@ function parallel(t,root,args) {
     child.on('close',(status,signal)=>{clearTimeout(timer);resolve({stdout,stderr,status,signal});});
   });
 }
-function fixture(t,{grant=true,bound=true,channels=['dot','feishu'],grantFields={},connectorSettings={}}={}) {
+function fixture(t,{grant=true,bound=true,channels=['dot','feishu'],grantFields={},connectorSettings={},allSenders=false}={}) {
   const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'task-conversation-cli-')),root=path.join(tmp,'store'),external=path.join(tmp,'transport');
   fs.mkdirSync(external);t.after(()=>fs.rmSync(tmp,{recursive:true,force:true}));let serial=0;
   const file=value=>{const p=path.join(tmp,`input-${++serial}.json`);write(p,value);return p;};
   const raw=(...args)=>cli(root,args),call=(...args)=>result(raw(...args));
   const fail=(pattern,...args)=>{const r=raw(...args);assert.ifError(r.error);assert.equal(r.signal,null);assert.notEqual(r.status,0,r.stdout);assert.match(r.stderr,pattern);return r.stderr;};
   const register=(id=TASK)=>call('register','--id',id,'--title','Synthetic release task','--goal','Prepare a reviewed release','--status','executing');
-  const allow=(fields={})=>call('allow-inbound',...options({id:'grant-one',connector:'fixture-one',account:'account-one',tenant:'tenant-one',sender:'sender-one',destination:'feishu-chat-one',mode:'agent',commands:'query,continue',tasks:TASK,since:'2000-01-01T00:00:00Z',format:'text',...fields}));
+  const allow=(fields={})=>call('allow-inbound',...options({id:'grant-one',connector:'fixture-one',account:'account-one',...(allSenders?{all_senders:true}:{tenant:'tenant-one',sender:'sender-one',destination:'feishu-chat-one'}),mode:'agent',commands:'query,continue',tasks:TASK,since:'2000-01-01T00:00:00Z',format:'text',...fields}));
   const binding={authorization_ref:'synthetic-user-authorization',verification_ref:'synthetic-platform-evidence',dot:{conversation_id:'dot-chat-one',sender_id:'dot-owner-one',root_id:'dot-original-root'},feishu:{grant_id:'grant-one',root_id:'feishu-original-root'},channels};
   const bind=(fields={},id=TASK)=>call('conversation-bind',id,'--file',file({...binding,...fields}));
   const message=(fields={})=>({id:'message-one',kind:'text',text:'已核对任务范围。\n请在任一会话继续。',privacy:'reviewed',audience:'shared',format:'text',...fields});
@@ -46,7 +46,7 @@ function fixture(t,{grant=true,bound=true,channels=['dot','feishu'],grantFields=
   const inbox=[];
   const ingest=event=>{inbox.push(event);write(path.join(external,'inbox.json'),inbox);call('ingest','--connector','fixture-one');return json(path.join(root,'integration.json')).inbox.find(r=>r.envelope?.message_id===event.message_id);};
   const associate=(id=TASK,grantId='grant-one',rootId='feishu-original-root')=>{
-    const g=json(path.join(root,'integration.json')).grants.find(g=>g.id===grantId),time=new Date().toISOString();
+    const g={...(allSenders?{tenant:'tenant-one',sender:'sender-one',destination:'feishu-chat-one'}:{}),...json(path.join(root,'integration.json')).grants.find(g=>g.id===grantId)},time=new Date().toISOString();
     ingest({event_id:'binding-event-'+id,message_id:'binding-message-'+id,account_id:g.account,tenant_id:g.tenant,sender_tenant_id:g.tenant,sender_id:g.sender,destination_id:g.destination,type:'text',text:'Associate this synthetic task.',root_id:rootId,received_at:time,occurred_at:time});
     const [entry]=call('message-next','--consumer','binding-worker').messages;assert.ok(entry,'binding inbox entry');assert.equal(entry.grant.id,grantId);
     call('message-record',entry.id,'--token',entry.token,'--decision-file',file({decision:'query',summary:'Verified synthetic association',reply:'Synthetic task association recorded.',task_id:id}));
@@ -368,4 +368,26 @@ test('roles are fixed by entry point and a user message can never become an outb
   assert.equal(f.show().messages[0].role,'user');assert.equal(f.show().deliveries.length,0);assert.equal(json(path.join(f.root,'integration.json')).outbox.length,before);assert.equal(f.next(),null);assert.deepEqual(f.deliver().deliveries,[]);
   f.publish(f.message({text:'I will prepare the requested draft.'}));const state=f.show();assert.equal(state.messages[1].role,'assistant');assert.equal(state.messages[1].sequence,2);assert.equal(state.deliveries.length,2);
   f.edit('conversations.json',d=>{d.deliveries[0].message_id=d.messages[0].id;});f.fail(/invalid conversation delivery/i,'doctor');assert.deepEqual(f.effects(),[]);
+});
+
+test('all-sender intake preserves explicit task conversations without binding other senders to their history',t=>{
+  const f=fixture(t,{allSenders:true});
+  f.ask();
+  assert.equal(f.effects()[0].destination.id,'feishu-chat-one');
+  const own=f.input({channel:'feishu',id:'own-input',provider_message_id:'own-message',text:'Please use PDF.'});
+  f.append(own);
+  const time=new Date().toISOString();
+  f.ingest({event_id:'other-event',message_id:'other-message',account_id:'account-one',tenant_id:'tenant-one',sender_tenant_id:'tenant-one',sender_id:'sender-two',
+    destination_id:'other-chat',type:'text',text:'Please query the task.',root_id:'feishu-original-root',received_at:time,occurred_at:time});
+  const claims=f.call('message-next','--consumer','open-intake','--limit','20').messages;
+  const same=claims.find(r=>r.envelope.message_id==='own-message'),other=claims.find(r=>r.envelope.message_id==='other-message');
+  assert.equal(same.context.task_conversation.matches.length,1);
+  assert.equal(other.context.task_conversation.matches.length,0);
+  assert.deepEqual(other.context.messages,[]);
+  f.call('message-record',other.id,'--token',other.token,'--decision-file',f.file({decision:'query',summary:'Task status checked',reply:'The task is executing.',task_id:TASK}));
+  f.call('deliver','--consumer','open-replies');
+  assert.equal(f.effects().at(-1).destination.id,'other-chat');
+  assert.equal(f.effects().at(-1).reply_to,'other-message');
+  const state=json(path.join(f.root,'integration.json'));assert.equal(state.grants.length,1);assert.equal(state.grants[0].sender,undefined);
+  assert.equal(f.call('doctor').ok,true);
 });

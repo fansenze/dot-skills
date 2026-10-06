@@ -232,7 +232,7 @@ export function default_store({ env = process.env, platform = process.platform, 
 }
 export function parse_args(argv=process.argv.slice(2)) {
   const args={store:default_store(),lock_timeout:10};let i=0;
-  function option(allowed){const raw=argv[i++],eq=raw.indexOf('='),key=raw.slice(2,eq<0?undefined:eq);if(!allowed.includes(key))throw new TaskError(`unrecognized argument: ${raw}`);let value;if(['all','initial','allow-new','updates'].includes(key)){if(eq>=0)throw new TaskError('--all does not take a value');value=true;}else{value=eq>=0?raw.slice(eq+1):argv[i++];if(value===undefined||value.startsWith('--'))throw new TaskError(`--${key} requires a value`);}args[key.replaceAll('-','_')]=value;}
+  function option(allowed){const raw=argv[i++],eq=raw.indexOf('='),key=raw.slice(2,eq<0?undefined:eq);if(!allowed.includes(key))throw new TaskError(`unrecognized argument: ${raw}`);let value;if(['all','initial','allow-new','updates','all-senders'].includes(key)){if(eq>=0)throw new TaskError(`--${key} does not take a value`);value=true;}else{value=eq>=0?raw.slice(eq+1):argv[i++];if(value===undefined||value.startsWith('--'))throw new TaskError(`--${key} requires a value`);}args[key.replaceAll('-','_')]=value;}
   while(i<argv.length&&argv[i].startsWith('-')){if(['--help','-h'].includes(argv[i]))return {...args,help:help()};option(['store','lock-timeout']);}
   args.command=argv[i++];if(!has(COMMAND_OPTIONS,args.command))throw new TaskError('a valid command is required; use --help');
   const positional=[];while(i<argv.length){if(['--help','-h'].includes(argv[i]))return {...args,help:help(args.command)};if(argv[i].startsWith('--'))option(COMMAND_OPTIONS[args.command]);else positional.push(argv[i++]);}

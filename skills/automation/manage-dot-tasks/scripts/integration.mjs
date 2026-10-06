@@ -1,6 +1,7 @@
 import {readConversations, conversationContext, ownsConversationRoute, conversationCompletionWrites, createConversations} from './task-conversations.mjs';
 import {responseDocument, responseFormat} from './reply-presentation.mjs';
 import {validateHandshakes, expireHandshakes, handshakeCommand, matchHandshake} from './identity-handshake.mjs';
+import {grantMatches, grantForMessage, configureAllSenders, validateAllSenders, messageTrigger} from './received-intake.mjs';
 import {taskResponseDocument as document} from './presentation.mjs';
 /** Transactional notifications and explicitly authorized agent/command intake. */
 import {createMessageInbox, agentMessage, grantCovers, messageText, messageEnvelope, validateMessages, validateContextGrants, requestFailureDocument} from './message-inbox.mjs';
@@ -14,7 +15,7 @@ export const INTEGRATION_OPTIONS = {
   'handshake-status': [], 'handshake-cancel': [],
   connect: ['id', 'module', 'settings-file'], connections: [], disconnect: [],
   watch: ['id', 'connector', 'account', 'destination', 'destination-type', 'format', 'events', 'tasks', 'language', 'initial'],
-  unwatch: [], 'allow-inbound': ['id', 'connector', 'account', 'tenant', 'sender', 'destination', 'commands', 'tasks', 'since', 'format', 'reply-mode', 'language', 'context-from', 'mode', 'allow-new', 'updates'],
+  unwatch: [], 'allow-inbound': ['id', 'connector', 'account', 'tenant', 'sender', 'destination', 'commands', 'tasks', 'since', 'format', 'reply-mode', 'language', 'context-from', 'mode', 'allow-new', 'updates', 'all-senders'],
   'message-next': ['consumer', 'limit', 'lease-ms'], 'message-renew': ['token', 'lease-ms'], 'message-record': ['token', 'decision-file'], 'message-ack': ['token'], 'message-fail': ['token', 'stage', 'reason'],
   'deny-inbound': [], 'request-failure': ['stage', 'reason', 'evidence'], outbox: ['all'], inbound: [],
   ingest: ['connector', 'limit'], deliver: ['consumer', 'limit', 'lease-ms'],
@@ -66,12 +67,14 @@ export function readIntegration(store) {
     if (['sending', 'recorded'].includes(n.state) && (n.state === 'sending' ? !n.intent || n.wire_body === undefined : !n.receipt)) throw new ConnectorError('Notification state lacks durable evidence');
     if (['claimed', 'sending'].includes(n.state) && !n.lease) throw new ConnectorError('Notification lease missing');
     const c = data.connections.find(c => c.id === n.route.connector_id), p = policies.find(p => p.id === n.route.policy_id);
-    if (!p || p.connector !== c.id || digest(n.route) !== digest(routeFor(c, p)) || n.id !== 'notice-' + digest([n.event_id, n.route]).slice(0, 40)) throw new ConnectorError('Notification route integrity failed');
+    const origin = p?.all_senders ? data.inbox.find(r => r.id === n.route.inbound_id && r.grant_id === p.id && r.connector === c.id) : null;
+    if (!p || p.connector !== c.id || (p.all_senders && !origin) || digest(n.route) !== digest(routeFor(c, p, origin)) || n.id !== 'notice-' + digest([n.event_id, n.route]).slice(0, 40)) throw new ConnectorError('Notification route integrity failed');
     if (n.wire_format !== undefined && (!c.capabilities.formats.includes(n.wire_format) || n.wire_format !== responseFormat(n.document,n.route.format,c.capabilities))) throw new ConnectorError('Notification wire format integrity failed');
     if (n.reply_in_thread !== undefined && (typeof n.reply_in_thread !== 'boolean' || !n.reply_to)) throw new ConnectorError('Invalid reply options');
     if (n.attempts < 0 || !Number.isFinite(Date.parse(n.available_at)) || (n.lease && !Number.isFinite(Date.parse(n.lease.until)))) throw new ConnectorError('Invalid notification recovery state');
   }
   validateHandshakes(data);
+  validateAllSenders(data);
   validateMessages(data);
   return data;
 }
@@ -99,8 +102,9 @@ function enqueue(data, eventId, route, doc, taskId = null, replyTo = null, reply
     document: doc, reply_to: replyTo, ...(replyInThread ? {reply_in_thread:true} : {}), state: 'pending', attempts: 0, max_attempts: 3, available_at: stamp(),
     lease: null, intent: null, receipt: null, history: [], created_at: stamp()});
 }
-const routeFor = (connection, policy) => ({connector_id: connection.id, binding: connection.binding, policy_id: policy.id,
-  account_id: policy.account, destination: {id: policy.destination, type: policy.destination_type ?? 'chat_id'}, format: policy.format});
+const routeFor = (connection, policy, entry = null) => ({connector_id: connection.id, binding: connection.binding, policy_id: policy.id,
+  account_id: policy.account, destination: {id: policy.all_senders ? entry.envelope.destination_id : policy.destination, type: policy.destination_type ?? 'chat_id'}, format: policy.format,
+  ...(policy.all_senders ? {inbound_id:entry.id} : {})});
 
 // Store.save merges these writes with the task, projections, index and scheduler.
 // No connector is loaded, no message is sent, and no source is polled in this hook.
@@ -120,7 +124,7 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
     const connection = data.connections.find(c => c.id === watch.connector && c.enabled);
     if (!connection || !watch.enabled || !covers(watch.tasks, task.id) || !watch.events.some(k => kinds.includes(k))) continue;
     const associated = data.inbox.filter(r => agentMessage(r) && r.binding === connection.binding && r.task_id === task.id && ['create','continue'].includes(r.decision?.decision)).findLast(r => {
-      const g = data.grants.find(g => g.id === r.grant_id);
+      const g = grantForMessage(data.grants.find(g => g.id === r.grant_id), r);
       return g?.enabled && g.updates && g.reply_mode === 'reply' && g.account === watch.account && g.destination === watch.destination && (watch.destination_type ?? 'chat_id') === 'chat_id' && grantCovers(data,g,task.id);
     });
     const replyTo = connection.capabilities.reply && associated ? associated.envelope.message_id : null;
@@ -129,19 +133,25 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
     changed = true;
   }
   // Progress follows an explicit updates grant and an agent-recorded association.
-  // One latest associated incoming message per immutable grant is the reply anchor.
-  if (previous && task.status === 'completed' && previous.status !== 'completed') for (const grant of data.grants.filter(g => g.mode === 'agent' && g.enabled && g.updates)) {
-    if(ownsConversationRoute(store,task.id,grant))continue;
-    const connection = data.connections.find(c => c.id === grant.connector && c.enabled);
-    const anchor = data.inbox.filter(r => agentMessage(r) && r.grant_id === grant.id && r.binding === connection?.binding && r.task_id === task.id && r.decision && ['create','continue'].includes(r.decision.decision)).at(-1);
-    if (!connection || !anchor || !grantCovers(data,grant,task.id)) continue;
-    const route = routeFor(connection, grant);
-    // A watch is the primary task-update route. Keep decision replies separate.
-    if (watchedRoutes.some(w => w.connector_id === route.connector_id && w.binding === route.binding &&
-      w.account_id === route.account_id && w.destination.id === route.destination.id &&
-      w.destination.type === route.destination.type && w.format === route.format)) continue;
-    enqueue(data, 'task:'+task.id+':'+task.revision, route, document([task], grant.language ?? 'zh'), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null, grant.reply_mode === 'reply');
-    changed = true;
+  // Preserve the latest request per sender/chat without creating identity grants.
+  if (previous && task.status === 'completed' && previous.status !== 'completed') for (const policy of data.grants.filter(g => g.mode === 'agent' && g.enabled && g.updates)) {
+    const connection = data.connections.find(c => c.id === policy.connector && c.enabled);
+    if (!connection) continue;
+    const anchors = new Map();
+    for (const r of data.inbox.filter(r => agentMessage(r) && r.grant_id === policy.id && r.binding === connection.binding && r.task_id === task.id && ['create','continue'].includes(r.decision?.decision))) {
+      anchors.set(policy.all_senders ? digest([r.envelope.tenant_id,r.envelope.sender_id,r.envelope.destination_id]) : policy.id, r);
+    }
+    for (const anchor of anchors.values()) {
+      const grant = grantForMessage(policy, anchor);
+      if (ownsConversationRoute(store,task.id,grant) || !grantCovers(data,grant,task.id)) continue;
+      const route = routeFor(connection, grant, anchor);
+      // A watch is the primary task-update route. Keep decision replies separate.
+      if (watchedRoutes.some(w => w.connector_id === route.connector_id && w.binding === route.binding &&
+        w.account_id === route.account_id && w.destination.id === route.destination.id &&
+        w.destination.type === route.destination.type && w.format === route.format)) continue;
+      enqueue(data, 'task:'+task.id+':'+task.revision, route, document([task], grant.language ?? 'zh'), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null, grant.reply_mode === 'reply');
+      changed = true;
+    }
   }
   return {...conversationWrites,...(changed ? writes(data) : {})};
 }
@@ -154,7 +164,8 @@ export function createIntegration({store, scheduler, makeTask}) {
     attempts: n.attempts, available_at: n.available_at, receipt: n.receipt});
   function policyActive(data, notice) {
     const c = data.connections.find(c => c.id === notice.route.connector_id);
-    const p = [...data.watches, ...data.grants].find(p => p.id === notice.route.policy_id && p.connector === c?.id);
+    const policy = [...data.watches, ...data.grants].find(p => p.id === notice.route.policy_id && p.connector === c?.id);
+    const p = grantForMessage(policy, data.inbox.find(r => r.id === notice.route.inbound_id));
     return c?.enabled && c.binding === notice.route.binding && p?.enabled && (!notice.task_id || grantCovers(data,p,notice.task_id));
   }
   function getLease(data, noticeId, token) {
@@ -287,32 +298,34 @@ export function createIntegration({store, scheduler, makeTask}) {
         if ((cp?.cursor ?? null) !== cursor) throw new ConnectorError('Inbox checkpoint advanced concurrently; reread');
         const messageKey = digest([snapshot.c.id, e.account_id, e.tenant_id, e.message_id]), eventKey = digest([snapshot.c.id, e.account_id, e.tenant_id, e.event_id]);
         const seen = data.inbox.some(r => r.id === messageKey || r.event_key === eventKey);
-        const command = parseCommand(e), received = Date.parse(e.received_at), occurred = e.occurred_at === undefined ? received : Date.parse(e.occurred_at);
-        const grant = data.grants.find(g => g.enabled && g.connector === snapshot.c.id && g.account === e.account_id && g.tenant === e.tenant_id &&
-          g.tenant === e.sender_tenant_id && g.sender === e.sender_id && g.destination === e.destination_id && Number.isFinite(received) && Number.isFinite(occurred) && Math.min(received, occurred) >= Date.parse(g.since) &&
+        const command = parseCommand(e);
+        const candidates = data.grants.filter(g => g.connector === snapshot.c.id);
+        const allSenders = candidates.find(g => g.all_senders && g.enabled && g.account === e.account_id) ?? candidates.findLast(g => g.all_senders && g.account === e.account_id);
+        const grant = (allSenders ? [allSenders] : candidates).find(g => grantMatches(g, e) &&
           ((g.mode === 'agent') || (g.mode !== 'agent' && command && g.commands.includes(command.verb) && (!command.task_id || covers(g.tasks, command.task_id)))));
         if (cp) cp.cursor = e.cursor; else data.checkpoints.push({id: snapshot.c.id, cursor: e.cursor});
         if (seen) { save(data); return; }
         const entry = {id: messageKey, event_key: eventKey, connector: snapshot.c.id, status: 'rejected', reason: 'not-authorized-or-not-a-command'};
         data.inbox.push(entry);
         const currentConnection = data.connections.find(c => c.id === snapshot.c.id);
-        const handshake = matchHandshake(data, currentConnection, e, page.events);
+        const handshake = allSenders ? null : matchHandshake(data, currentConnection, e, page.events);
         if (handshake) {
           Object.assign(entry, {reason:handshake.reason, ...(handshake.setup_id ? {setup_id:handshake.setup_id,status:'accepted'} : {})});
           if (handshake.watch && handshake.initial) enqueue(data, 'initial:' + handshake.watch.id, routeFor(currentConnection,handshake.watch), document(store.all().filter(t=>covers(handshake.watch.tasks,t.id)),handshake.watch.language,false));
           save(data); return;
         }
-        if (!grant || !currentConnection.enabled || currentConnection.binding !== snapshot.c.binding) { save(data); return; }
+        if (!currentConnection.enabled || currentConnection.binding !== snapshot.c.binding) { save(data); return; }
+        if (!grant) { save(data); return; }
         if (grant.mode === 'agent') {
           if(!messageText(e)){
             const reason = !['text','post'].includes(e.type) ? '不支持此消息类型，请发送文本或含文字的富文本。' : '无法提取安全且完整的正文，请检查格式或发送不超过 8000 字符的文本。';
             Object.assign(entry,{mode:'request_failure',grant_id:grant.id,binding:currentConnection.binding,envelope:messageEnvelope({...e,text:undefined,text_source:undefined,text_omitted:undefined}),status:'failed',reason:'content-unavailable',failure:{stage:'parse',reason,at:stamp()}});
-            enqueue(data,'failure:'+messageKey,routeFor(currentConnection,grant),requestFailureDocument(entry,grant.language),null,grant.reply_mode==='reply'?e.message_id:null,grant.reply_mode==='reply');
+            enqueue(data,'failure:'+messageKey,routeFor(currentConnection,grant,entry),requestFailureDocument(entry,grant.language),null,grant.reply_mode==='reply'?e.message_id:null,grant.reply_mode==='reply');
             save(data);return;
           }
           Object.assign(entry, {mode:'agent', grant_id:grant.id, binding:currentConnection.binding, envelope:messageEnvelope(e), status:'pending', reason:'awaiting-agent', lease:null, decision:null});
           const zh = (grant.language ?? 'zh') === 'zh';
-          if(!conversationContext(store,entry).matches.length)enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant), responseDocument({template:'ack',lead:zh?'收到，正在处理。':'Received; I am reviewing your request.'},stamp()), null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
+          if(!conversationContext(store,entry).matches.length)enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant, entry), responseDocument({template:'ack',lead:zh?'收到，正在处理。':'Received; I am reviewing your request.'},stamp()), null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
           save(data); return;
         }
         if (command.task_id && !store.index().some(t => t.id === command.task_id)) { entry.reason = 'unknown-task'; save(data); return; }
@@ -405,15 +418,17 @@ export function createIntegration({store, scheduler, makeTask}) {
         return {id:r.id,status:'failed',task_id:null,duplicate:Boolean(prior),notification:'none; historical annotation never replays or sends'};
       }
       if (cmd === 'outbox') return data.outbox.filter(n => args.all || !['api_accepted', 'cancelled'].includes(n.state)).map(publicNotice);
-      if (cmd === 'inbound') return {checkpoints: data.checkpoints, outcomes: data.inbox.map(r => agentMessage(r) ? {id:r.id,event_key:r.event_key,connector:r.connector,grant_id:r.grant_id,mode:r.mode,status:r.failure?'failed':r.status,reason:r.reason,task_id:r.task_id??null,summary:r.decision?.summary??null,...(r.failure?{failure:r.failure}:{})} : r.failure ? {id:r.id,connector:r.connector,grant_id:r.grant_id,status:'failed',task_id:null,failure:r.failure} : r)};
+      if (cmd === 'inbound') return {checkpoints: data.checkpoints, outcomes: data.inbox.map(r => agentMessage(r) ? {id:r.id,event_key:r.event_key,connector:r.connector,grant_id:r.grant_id,mode:r.mode,status:r.failure?'failed':r.status,reason:r.reason,task_id:r.task_id??null,trigger:messageTrigger(r.envelope),summary:r.decision?.summary??null,...(r.failure?{failure:r.failure}:{})} : r.failure ? {id:r.id,connector:r.connector,grant_id:r.grant_id,status:'failed',task_id:null,...(r.envelope?{trigger:messageTrigger(r.envelope)}:{}),failure:r.failure} : r)};
       if (['disconnect', 'unwatch', 'deny-inbound'].includes(cmd)) {
         const list = cmd === 'disconnect' ? data.connections : cmd === 'unwatch' ? data.watches : data.grants;
         const item = list.find(v => v.id === args.id); if (!item) throw new ConnectorError('Unknown binding');
-        item.enabled = false; save(data); return {id: item.id, enabled: false};
+        item.enabled = false;
+        save(data); return {id: item.id, enabled: false};
       }
       if (cmd === 'watch' || cmd === 'allow-inbound') {
         const c = data.connections.find(c => c.id === args.connector && c.enabled); if (!c) throw new ConnectorError('Unknown or disabled connector');
-        const p = {id: id(args.id), connector: c.id, account: requireText(args.account, 'account'), destination: requireText(args.destination, 'destination'),
+        const allSenders = cmd === 'allow-inbound' && args.all_senders;
+        const p = {id: id(args.id), connector: c.id, account: requireText(args.account, 'account'), ...(!allSenders ? {destination: requireText(args.destination, 'destination')} : {}),
           destination_type: args.destination_type ?? 'chat_id', format: args.format ?? 'card', tasks: taskScope(args.tasks), enabled: true};
         if (!['text', 'markdown', 'card'].includes(p.format)) throw new ConnectorError('Unsupported notification format');
         const requireOutbound = method => {
@@ -425,7 +440,10 @@ export function createIntegration({store, scheduler, makeTask}) {
           p.events = csv(args.events ?? 'completed', EVENTS); p.language = args.language ?? 'zh'; if (!['en', 'zh'].includes(p.language)) throw new ConnectorError('Invalid language'); list = data.watches;
         } else {
           if (!c.capabilities.receive || !c.capabilities.durable_cursor) throw new ConnectorError('Durable inbox capability required');
-          p.tenant = requireText(args.tenant, 'tenant'); p.sender = requireText(args.sender, 'sender');
+          if (allSenders) configureAllSenders(data, c, p, args);
+          else {
+            p.tenant = requireText(args.tenant, 'tenant'); p.sender = requireText(args.sender, 'sender');
+          }
           if (!['commands','agent'].includes(args.mode ?? 'commands')) throw new ConnectorError('Invalid inbound mode');
           if (args.mode === 'agent') {
             if (args.language !== undefined) { if (!['en','zh'].includes(args.language)) throw new ConnectorError('Invalid language'); p.language = args.language; }
@@ -448,6 +466,7 @@ export function createIntegration({store, scheduler, makeTask}) {
         if (prior && digest({...prior, enabled: true}) !== digest(p)) throw new ConnectorError('Policy identity is immutable; disable it and use a new ID to change scope');
         if (!prior && [...data.watches, ...data.grants].some(v => v.id === p.id)) throw new ConnectorError('Policy ID already exists');
         if (prior) prior.enabled = true; else list.push(p);
+        if (allSenders) for (const setup of data.handshakes.filter(h => h.connector === c.id && h.account === p.account && h.state === 'pending')) setup.state = 'cancelled';
         if (cmd === 'watch' && args.initial && !prior) enqueue(data, 'initial:' + p.id, routeFor(c, p), document(store.all().filter(t => covers(p.tasks, t.id)), p.language, false));
         save(data); return p;
       }
