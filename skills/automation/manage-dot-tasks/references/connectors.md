@@ -11,7 +11,7 @@ The following direct-adapter bindings require paths in the same environment as t
 ```bash
 node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" init
 node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" connect --id feishu-main --module "$SKILL_DIR/scripts/connectors/feishu.mjs" --settings-file "$SETTINGS_FILE"
-node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" watch --id task-updates --connector feishu-main --account "$APP_ID" --destination "$CHAT_ID" --destination-type chat_id --format card --events completed --tasks "$EXISTING_TASK_IDS" --initial
+node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" watch --id task-updates --connector feishu-main --account "$APP_ID" --destination "$CHAT_ID" --destination-type chat_id --format card --events completed --tasks "$EXISTING_TASK_IDS"
 node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" allow-inbound --id user-conversation --connector feishu-main --account "$APP_ID" --tenant "$TENANT_ID" --sender "$SENDER_OPEN_ID" --destination "$CHAT_ID" --mode agent --commands query,create,continue --tasks "$EXISTING_TASK_IDS" --allow-new --updates --format card --reply-mode reply
 node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" start --consumer dot-active --timeout-ms 30000
 ```
@@ -39,7 +39,7 @@ The same first real request records sender, tenant, chat, app, message/event IDs
 
 Reuse the same policy ID, scope and cutoff on restart. Duplicate IDs and earlier messages are not replayed. The timestamp comparison accounts for the receiver's whole-second receive time while retaining provider creation-time precision. `deny-inbound POLICY_ID` stops this intake and its pending replies; restarting does not re-enable it. Enabling open intake deliberately supersedes old sender-specific admission filters for new messages in that bot account, without modifying old grants or their recorded operations. Only one enabled all-senders policy exists per connector/account. Selecting it cancels pending legacy challenges; subsequent messages are ordinary input, even if their text resembles an old binding code.
 
-The default startup overview is shown in dot, with no independent Feishu watch or startup list push. A task-list request receives its ordinary scoped reply in the incoming conversation. A separately requested independent watch or initial Feishu overview still needs an actual destination. Reuse the requested target or defer its delivery until a real request supplies one; never request a seed message to finish startup or delay the first task for watch setup. The existing active consumer, decision, scheduling and acceptance workflow continues unchanged.
+A requested independent watch or initial Feishu overview still needs an actual destination. Reuse the requested target or defer its delivery until a real request supplies one. After successful startup, notify the user briefly in dot. Never request a seed message to finish startup or delay the first task for watch setup. The existing active consumer, decision, scheduling and acceptance workflow continues unchanged.
 
 ## First identity handshake
 
