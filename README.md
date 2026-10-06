@@ -26,34 +26,40 @@ This prompt selects **dot for both the Feishu service and task management**. You
 ```text
 My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer. (This file contains no secret keys, tokens, or other credentials.)
 Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills.
-In my private chat with the bot, let me manage my existing and new dot/Codex tasks
-through natural language. Send an initial overview of up to 10 recently updated active tasks
-and completion notifications there. Do not scan all task history during startup.
+Process every message this bot receives, regardless of sender. Record who sent each
+request and its chat, then process that same request without a binding code or test message.
+Let received requests manage my existing and new dot/Codex tasks through natural language.
+Show an initial overview of up to 10 recently updated active tasks here in dot.
+Reply to requests and send their completion results in the originating Feishu chat.
+Do not scan all task history during startup.
 
 Follow my instructions exactly and execute promptly. Do not speculate about my config,
 run content checks on it, or add unrelated checks or actions.
 ```
 
-Dot checks the requested version and existing installation, then reuses a matching setup on the selected host. This request authorizes transferring the specified configuration to dot through Library and using the verified dot-local copy. On first use, dot may ask you to send the bot one private message, then checks sender/chat ownership before enabling intake or sending task information. An already verified chat is reused without another introductory message.
+Dot checks the requested version and existing installation, then reuses a matching setup on the selected host. This request authorizes transferring the specified configuration to dot through Library and using the verified dot-local copy. The receiver and task consumer can start before anyone sends a message; no binding code, introductory message or sender ownership check is needed.
+
+The initial task overview appears **here in dot**. On first use, the bot configuration identifies the app but supplies no recipient for a Feishu task list. Each real request records its sender and chat and enters processing immediately; replies and completion results go back to that chat. A separately requested proactive message can reuse an explicitly supplied or previously verified destination without a fresh incoming message.
 
 If you explicitly want **the Feishu service on your connected computer**, say so and name that computer. Dot then uses Remote Config Bridge, keeping the configuration and transport there while task management remains on dot. If service location is missing or ambiguous, dot asks before starting either route.
 
 ### 3. Manage tasks in Feishu
 
-Once dot confirms the connection and your private chat, send ordinary messages such as “What are my tasks?”, “Start a new task to compare these options,” or “Continue the README task.” Dot reports completion results in that chat. The workflow runs while dot is active; it cannot wake an inactive dot.
+Once dot confirms the receiver connection and active task consumer, send ordinary messages such as “What are my tasks?”, “Start a new task to compare these options,” or “Continue the README task.” Send a private message or mention the bot in a group. Anyone's first message is handled directly as a request. Asking for the task list returns it in that conversation; creating or continuing a task routes its completion result there. The workflow runs while dot is active; it cannot wake an inactive dot.
 
-For **new tasks only**, replace the lines about task scope and updates in the startup prompt with:
+For **new tasks only**, replace the lines about task scope, the initial overview and completion results in the startup prompt with:
 
 ```text
-In my private chat with the bot, accept ordinary messages to create and continue new tasks,
-and send their completion results there. Include only tasks created through this chat.
+Accept ordinary messages from any sender to create and continue new tasks.
+Include only tasks created through that conversation, and send their completion results there.
+Do not discover or show an overview of pre-existing tasks.
 ```
 
 To resume, keep the selected service host, verified configuration and existing scope:
 
 ```text
 Resume Manage Dot Tasks and the Feishu service on dot using the existing verified
-dot-local configuration, installation, private chat and task scope.
+dot-local configuration, installation, bot account and task scope. Preserve recorded reply routes.
 ```
 
 Task execution location is a separate choice from the Feishu service host and configuration source. State any different task executor explicitly; task actions still need their usual permissions. For task management without messaging, ask “Install and initialize Manage Dot Tasks locally, without Feishu.”
