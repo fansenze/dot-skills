@@ -34,7 +34,7 @@ node "$FEISHU_SKILL/scripts/server.mjs" start \
   --config "$SERVICE_CONFIG" --state-dir "$RECEIVER_STATE" \
   --resident-dir "$RESIDENT_DIR"
 
-# In another task command, inspect the exact same instance:
+# In the same reachable host/network namespace, inspect the exact same instance:
 node "$FEISHU_SKILL/scripts/server.mjs" health \
   --config "$SERVICE_CONFIG" --state-dir "$RECEIVER_STATE" \
   --resident-dir "$RESIDENT_DIR"
@@ -93,3 +93,5 @@ Repository validation uses temporary stores, synthetic accounts/messages, a loop
 Passing these tests establishes only the exercised local behavior. It does not prove live Feishu/Lark delivery, production permission correctness, token-expiry behavior against the live provider, recipient ownership, real-platform latency, throughput, or a performance improvement. Any live comparison needs its own authorized production integration and measurements.
 
 For a request limited to validation on dot followed by stopping, complete the local checks, stop the test process, verify its endpoint/lock cleanup, report the results and remaining coverage limits, and stop. Do not deploy, auto-start on login, provision production credentials, replace the active skill, connect a real account, or send a test message as a validation side effect.
+
+Separate dot exec calls may share files but have different network and PID namespaces. An endpoint file or PID is not proof that another call can reach localhost. Keep receiver and consumer commands in one persistent tool session when required; inspect health from that consumer session. Never kill a PID obtained from another namespace or delete its lock to force recovery. A session supervisor may stop only its own child receiver; reused instances retain their original owner.

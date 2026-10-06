@@ -76,3 +76,16 @@ Report only useful readiness changes, keeping local ledger, memory persistence, 
 Use [all-sender intake](connectors.md#intake-without-a-binding-message) for this open bot workflow after scope is resolved. A missing first private-chat identity is not a startup blocker. Keep the legacy handshake branch only for users who explicitly request a separate identity-verification exchange. The new-task-only recipe intentionally has no independent watch. The existing-task recipe requires the resolved authorized scope (selected IDs, or all only for a wholly scoped ledger). Follow [first use](first-use.md) for authorized platform memory, and the Feishu/bridge skills for their environment-specific setup.
 
 Run [startup scenarios](../tests/startup-scenarios.md) and `node --test tests/startup.test.mjs` for isolated regression checks. Mock transport effects, scripted decisions and simulated environment observations do not prove live Feishu delivery, receiver reuse on a real computer, complete platform discovery, agent reasoning quality or platform-memory persistence.
+
+
+## Same-session direct startup on dot
+
+Separate exec calls can share files without sharing localhost or PID namespaces. When this applies, keep receiver and taskctl commands in one persistent tool session:
+
+```bash
+node "$TASK_SKILL/scripts/managed-session.mjs" --store "$STORE_DIR" --settings-file "$SETTINGS_FILE"
+```
+
+Keep stdin open. The thin entry point reuses a resident reachable through the existing server `health` command, or starts one if no endpoint exists. It emits `ready` after that command reports a connected receiver. A blocked existing endpoint is left untouched: coordinate its owner rather than deleting locks or killing a PID from shared files. On EOF or a stop signal, the entry point stops only child processes it created, never a reused receiver.
+
+After `ready`, send a JSON line such as `{"id":"cycle-1","args":["start","--consumer","dot-active","--timeout-ms","30000"]}` through the same tool-session handle and collect its matching `result`. The active agent interprets returned messages, calls actual platform tools and submits explicit taskctl decision/scheduling/ack commands through that session. It must re-arm the next bounded `start` itself. The entry point does not infer decisions, execute platform tasks, call platform APIs, change bindings/policies/cutoffs/outboxes, or retry uncertain sends. Shared files can hold sanitized decision inputs; network-dependent taskctl commands stay in this session. Normal local CLI use is unchanged. Startup health is point-in-time evidence, not a delivery guarantee or inactive-agent wake-up.
