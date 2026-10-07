@@ -308,7 +308,7 @@ test('start delivers one canonical Feishu message, returns the dot lease and exp
 });
 
 test('verified completion creates one canonical pair, suppresses same-route watches and retains other routes',t=>{
-  const f=fixture(t);for(const [id,destination] of [['same-route','feishu-chat-one'],['other-route','other-authorized-chat']])f.call('watch',...options({id,connector:'fixture-one',account:'account-one',destination,tasks:TASK,events:'completed',format:'text'}));
+  const f=fixture(t,{grantFields:{format:'card'}});for(const [id,destination] of [['same-route','feishu-chat-one'],['other-route','other-authorized-chat']])f.call('watch',...options({id,connector:'fixture-one',account:'account-one',destination,tasks:TASK,events:'completed',format:'text'}));
   f.fail(/verified completed/i,'conversation-publish',TASK,'--file',f.file(f.message({kind:'completed'})));
   f.call('update',TASK,'--summary','Intermediate change');assert.equal(f.show().messages.length,0);
   f.call('update',TASK,'--status','awaiting_verification','--reason','Synthetic checks ready');f.call('check',TASK,'--name','Synthetic acceptance','--outcome','pass','--evidence','Fabricated isolated verification');
@@ -316,6 +316,8 @@ test('verified completion creates one canonical pair, suppresses same-route watc
   const state=f.show();assert.equal(state.messages.length,1);assert.equal(state.messages[0].kind,'completed');assert.equal(state.deliveries.length,2);
   const notices=f.call('outbox').filter(n=>n.task_id===TASK);assert.equal(notices.length,1);assert.equal(notices[0].route.destination.id,'other-authorized-chat');
   const started=f.call('start','--consumer','completion-worker','--timeout-ms','0');assert.equal(started.notifications.length,2);assert.deepEqual(f.effects().map(e=>e.destination.id).sort(),['feishu-chat-one','other-authorized-chat']);
+  const card=f.effects().find(e=>e.destination.id==='feishu-chat-one');assert.equal(card.format,'card');assert.equal(card.body.header.text_tag_list[0].text.content,'已完成');
+  assert.match(JSON.stringify(card.body),/完成于/);assert.doesNotMatch(JSON.stringify(card.body),/Synthetic acceptance|Fabricated isolated verification/);
   assert.equal(f.show().messages.length,1);assert.equal(started.conversation_deliveries.dot.length,1);assert.equal(f.call('show',TASK).status,'completed');
 });
 

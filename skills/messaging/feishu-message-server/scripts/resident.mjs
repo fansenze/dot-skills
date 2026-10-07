@@ -7,7 +7,7 @@ import { findProject } from './project.mjs';
 import { fileURLToPath } from 'node:url';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
-const allowed = new Set(['health', 'identity', 'capabilities', 'inbox', 'inbox-page', 'send', 'reply']);
+const allowed = new Set(['health', 'identity', 'capabilities', 'inbox', 'inbox-page', 'send', 'reply', 'react']);
 const fail = code => Object.assign(new SafeError(code), {code});
 export function privatePath(filename, directory = false) {
   const st = fs.lstatSync(filename);
@@ -50,7 +50,7 @@ export async function residentRequest({directory, identity, operation, args = {}
       res.on('end', () => { try { const result = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(Buffer.concat(chunks))); if (res.statusCode !== 200) reject(fail(result.error ?? 'resident-rejected')); else resolve(result); } catch { reject(fail('resident-invalid-response')); } });
     });
     req.setTimeout(timeout, () => req.destroy());
-    req.on('error', () => reject(fail(['send','reply'].includes(operation) ? 'resident-delivery-unknown-no-fallback' : 'resident-unavailable-no-fallback')));
+    req.on('error', () => reject(fail(['send','reply','react'].includes(operation) ? 'resident-delivery-unknown-no-fallback' : 'resident-unavailable-no-fallback')));
     req.end(body);
   });
 }
@@ -72,7 +72,7 @@ export async function startResident({directory, identity, handler, signal}) {
     if (!value || !allowed.has(value.operation) || !same(value.identity, identity) || value.instance !== instance) throw fail('resident-binding-or-operation-mismatch');
     const args = value.args;
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw fail('invalid-arguments');
-    if (!['send','reply'].includes(value.operation)) return handler(value.operation, args);
+    if (!['send','reply','react'].includes(value.operation)) return handler(value.operation, args);
     const key = args.idempotencyKey;
     if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,50}$/.test(key)) throw fail('idempotency-key-required');
     const receipt = path.join(receipts, `${hash(key)}.json`);

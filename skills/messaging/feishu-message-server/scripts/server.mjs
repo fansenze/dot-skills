@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, DEFAULT_STATE, SafeError, ConfigError, loadConfig, initialize, checkConfig, prepareConfig } from './config.mjs';
 import { readInbox, readInboxPage } from './messages.mjs';
-import { createNetwork, createClient, sendMessage, getHttpDiagnostics } from './transport.mjs';
+import { createNetwork, createClient, sendMessage, addReaction, getHttpDiagnostics } from './transport.mjs';
 import { CAPABILITIES } from './formats.mjs';
 import { startListener, createLog } from './runtime.mjs';
 import { startResident, residentRequest, runtimeIdentity } from './resident.mjs';
@@ -26,6 +26,7 @@ Usage: bash feishu.sh <command> [options]
   identity                      Report configured app ID and brand only; no network call
   send --receive-id ID --text TEXT [--receive-id-type chat_id]
   reply --message-id ID --text TEXT [--reply-in-thread]
+  react --message-id ID --emoji-type Get  Add an explicitly requested reaction
   test | validate | package     Offline tests, skill check, safe portable archive
 Options: --config FILE --brand feishu|lark --state-dir DIR
 Resident: --resident-dir DIR (trusted local service; no separate access token)
@@ -48,6 +49,7 @@ const options = {
   inbox: {...shared, limit: {type: 'string'}, 'show-text': {type: 'boolean'}},
   'inbox-page': {...shared, cursor: {type: 'string'}, limit: {type: 'string'}, 'show-text': {type: 'boolean'}}, capabilities: shared, identity: shared,
   send: {...shared, ...outgoing, 'receive-id': {type: 'string'}, 'receive-id-type': {type: 'string'}},
+  react: {...shared, 'message-id':{type:'string'}, 'emoji-type':{type:'string'}, 'idempotency-key':{type:'string'}, 'expected-app-id':{type:'string'}, 'expected-brand':{type:'string'}},
   reply: {...shared, ...outgoing, 'message-id': {type: 'string'}, 'reply-in-thread': {type: 'boolean'}}
 };
 
@@ -159,6 +161,7 @@ export async function main(argv = process.argv.slice(2)) {
           if (operation === 'capabilities') return CAPABILITIES;
           if (operation === 'inbox-page') return readInboxPage(path.join(stateDir, 'messages.sqlite3'), args);
           if (operation === 'inbox') return {messages: readInbox(path.join(stateDir, 'messages.sqlite3'), args.limit ?? 20, Boolean(args.showText))};
+          if (operation === 'react') return addReaction(client,args);
           if ((operation === 'reply') !== (args.messageId !== undefined)) throw new SafeError('operation-target-mismatch');
           return sendMessage(client, args);
         }});
@@ -176,22 +179,28 @@ export async function main(argv = process.argv.slice(2)) {
     }
     return 0;
   }
-  if ([v.text !== undefined, v['text-file'] !== undefined, Boolean(v.stdin)].filter(Boolean).length !== 1) {
-    throw new SafeError('Provide exactly one of --text, --text-file or --stdin');
+  let outgoingArgs;
+  if (command === 'react') {
+    if (!v['message-id'] || !v['emoji-type']) throw new SafeError('react requires message-id and emoji-type');
+    outgoingArgs={messageId:v['message-id'],emojiType:v['emoji-type'],idempotencyKey:v['idempotency-key'] ?? randomUUID()};
+  } else {
+    if ([v.text !== undefined, v['text-file'] !== undefined, Boolean(v.stdin)].filter(Boolean).length !== 1) {
+      throw new SafeError('Provide exactly one of --text, --text-file or --stdin');
+    }
+    let text = v.text;
+    if (v['text-file']) {
+      try {
+        if (fs.statSync(v['text-file']).size > 80000) throw new Error();
+        text = new TextDecoder('utf-8', {fatal: true}).decode(fs.readFileSync(v['text-file']));
+      } catch { throw new SafeError('Text file must be readable UTF-8 and within size limit'); }
+    }
+    if (v.stdin) text = await readStdin(80000);
+    if (command === 'reply' && !v['message-id']) throw new SafeError('message-id is required for reply');
+    let body = text;
+    if (v.format === 'card') { try { body = JSON.parse(text); } catch { throw new SafeError('Card input must be JSON'); } }
+    outgoingArgs = {format: v.format ?? 'text', body, idempotencyKey: v['idempotency-key'] ?? randomUUID(),
+      receiveId: v['receive-id'], receiveIdType: v['receive-id-type'], messageId: v['message-id'], replyInThread: Boolean(v['reply-in-thread'])};
   }
-  let text = v.text;
-  if (v['text-file']) {
-    try {
-      if (fs.statSync(v['text-file']).size > 80000) throw new Error();
-      text = new TextDecoder('utf-8', {fatal: true}).decode(fs.readFileSync(v['text-file']));
-    } catch { throw new SafeError('Text file must be readable UTF-8 and within size limit'); }
-  }
-  if (v.stdin) text = await readStdin(80000);
-  if (command === 'reply' && !v['message-id']) throw new SafeError('message-id is required for reply');
-  let body = text;
-  if (v.format === 'card') { try { body = JSON.parse(text); } catch { throw new SafeError('Card input must be JSON'); } }
-  const outgoingArgs = {format: v.format ?? 'text', body, idempotencyKey: v['idempotency-key'] ?? randomUUID(),
-    receiveId: v['receive-id'], receiveIdType: v['receive-id-type'], messageId: v['message-id'], replyInThread: Boolean(v['reply-in-thread'])};
   if (!v.standalone) {
     try {
       const result = await residentRequest({directory: residentDir, identity: {app_id: config.app_id, brand: config.brand, runtime: runtimeIdentity()}, operation: command, args: outgoingArgs});
@@ -203,7 +212,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const network = createNetwork();
   try {
-    const result = await sendMessage(createClient(config, network), outgoingArgs);
+    const result = await (command === 'react' ? addReaction : sendMessage)(createClient(config, network), outgoingArgs);
     print(result); return result.ok ? 0 : 1;
   } finally { network.close(); }
 

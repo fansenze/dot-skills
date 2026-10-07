@@ -1,10 +1,8 @@
-import {renderResponse} from '../reply-presentation.mjs';
-import {uiTime} from '../presentation.mjs';
 /** Calls the actual feishu-message-server CLI, never the platform directly. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { ConnectorError, renderText, requireText } from './contract.mjs';
+import { ConnectorError, requireText } from './contract.mjs';
 
 // Provider envelope IDs are context hints, never sender identity or authorization.
 // Omit malformed optional metadata instead of truncating or inventing identifiers.
@@ -23,7 +21,7 @@ export function createConnector(settings) {
     const env = {...process.env}; delete env.DEBUG; delete env.NODE_DEBUG;
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', settings.server, ...args], {stdio: ['pipe', 'pipe', 'pipe'], env, signal});
-      const timer = setTimeout(() => child.kill('SIGKILL'), args[0] === 'send' || args[0] === 'reply' ? 74000 : 14000);
+      const timer = setTimeout(() => child.kill('SIGKILL'), ['send','reply','react'].includes(args[0]) ? 74000 : 14000);
       let stdout = '', size = 0;
       child.stdout.on('data', data => { size += data.length; if (size > 4 * 1024 * 1024) child.kill('SIGKILL'); else stdout += data; });
       // Do not copy raw stderr, CLI exceptions, credentials or message bodies into diagnostics.
@@ -33,17 +31,6 @@ export function createConnector(settings) {
       child.stdin.end(body);
     });
   }
-  const render = (format, doc) => {
-    if (doc.response) return renderResponse(doc.response, format);
-    if (format === 'text' || format === 'markdown') return renderText(doc, format === 'markdown');
-    if (format !== 'card') throw new ConnectorError('Unsupported format');
-    const plain = text => ({tag: 'div', text: {tag: 'plain_text', content: String(text)}});
-    const row = cells => ({tag: 'column_set', flex_mode: 'none', columns: cells.map((value, i) => ({
-      tag: 'column', width: 'weighted', weight: i === 2 ? 3 : 2, elements: [plain(value)]}))});
-    return {config: {wide_screen_mode: true}, header: {title: {tag: 'plain_text', content: doc.title+' · '+uiTime(doc.updated_at)}},
-      elements: [...(doc.columns.length && doc.rows.length ? [row(doc.columns)] : []),
-        ...doc.rows.map(row), ...doc.details.map(plain)]};
-  };
   async function send(message, signal, reply = false) {
     if (message.account_id !== settings.account_id) return {status: 'not_sent', idempotency_key: message.idempotency_key, retryable: false, error_code: 'binding-mismatch'};
     const args = [reply ? 'reply' : 'send', '--config', settings.config_ref, '--state-dir', settings.state_dir, '--expected-app-id', settings.account_id, '--expected-brand', settings.brand,
@@ -58,9 +45,15 @@ export function createConnector(settings) {
       retryable: result.status === 'not_sent' && ['ECONNABORTED', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET'].includes(result.error_code)};
   }
   return {
-    capabilities: () => invoke(['capabilities']), render,
+    capabilities: () => invoke(['capabilities']),
     send: (message, {signal} = {}) => send(message, signal),
     reply: (message, {signal} = {}) => send(message, signal, true),
+    async react(message, {signal} = {}) {
+      if (message.account_id !== settings.account_id) return {status:'not_sent',idempotency_key:message.idempotency_key,retryable:false,error_code:'binding-mismatch'};
+      const result = await invoke(['react','--config',settings.config_ref,'--state-dir',settings.state_dir,'--expected-app-id',settings.account_id,'--expected-brand',settings.brand,
+        '--message-id',requireText(message.message_id,'reaction target'),'--emoji-type',requireText(message.emoji_type,'emoji type',64),'--idempotency-key',message.idempotency_key],undefined,signal);
+      return {...result,status:result.ok === true && result.reaction_id ? 'api_accepted' : result.status,retryable:false};
+    },
     async receive({cursor, limit = 100, signal} = {}) {
       const args = ['inbox-page', '--state-dir', settings.state_dir, '--limit', String(limit), '--show-text'];
       if (cursor !== null && cursor !== undefined) args.push('--cursor', cursor);

@@ -1,37 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {fileURLToPath} from 'node:url';
-import {taskDocument,taskResponseDocument,userStatus,uiTime} from '../scripts/presentation.mjs';
+import {taskResponseDocument,taskStatusLabel,uiTime} from '../scripts/presentation.mjs';
 import {render_list,render_task} from '../scripts/taskctl.mjs';
-import {createConnector} from '../scripts/connectors/feishu.mjs';
 import {sendResult} from '../scripts/connectors/contract.mjs';
-import {renderResponse} from '../scripts/reply-presentation.mjs';
+import {renderResponse,renderConnectorDocument} from '../scripts/reply-presentation.mjs';
 const fixture=JSON.parse(fs.readFileSync(new URL('./fixtures/python-schema1/tasks/task-legacy/task.json',import.meta.url),'utf8'));
 const config={stale_hours:24};
 const template=name=>fs.readFileSync(new URL('../ui/'+name,import.meta.url),'utf8');
 
-test('all internal states map to exactly four Chinese statuses and preserve blocked/cancelled explanations',()=>{
+test('task projections use readable statuses and preserve blockers',()=>{
  const seen=new Set();
  for(const status of ['queued','executing','blocked','awaiting_verification','completed','failed','cancelled']){
   const task={...fixture,status,blocker:status==='blocked'?'缺少用户确认':'',completion:status==='completed'?{at:'2026-10-04T01:02:03Z',summary:'虚构结果已核对'}:null};
-  seen.add(userStatus(task).split(' · ')[0].split(' ').slice(1).join(' '));
-  const doc=taskDocument([task]);assert.equal(doc.title,task.title);assert.deepEqual(doc.rows,[]);assert.deepEqual(doc.columns,[]);assert.ok(doc.details[0].includes(task.id));assert.ok(!doc.details.includes(task.title));
-  assert.doesNotMatch(doc.details.join('\n'),/awaiting_verification|executing/);
-  if(status==='blocked'){assert.match(doc.details.join('\n'),/排队中/);assert.match(doc.details.join('\n'),/受阻，等待处理：缺少用户确认/);}
-  if(status==='cancelled'){assert.match(doc.details.join('\n'),/失败/);assert.match(doc.details.join('\n'),/已取消，未完成/);}
+  seen.add(taskStatusLabel(task));
+  const doc=taskResponseDocument([task]);assert.equal(doc.response.title,task.title);assert.equal(doc.response.status,taskStatusLabel(task));
+  assert.doesNotMatch(JSON.stringify(doc.response),/awaiting_verification|executing/);
+  if(status==='blocked')assert.match(JSON.stringify(doc.response.sections),/缺少用户确认/);
  }
- assert.deepEqual([...seen].sort(),['排队中','执行中','成功','失败'].sort());
+ assert.deepEqual([...seen].sort(),['排队中','执行中','受阻','待验收','已完成','失败','已取消'].sort());
 });
-test('Markdown footers use actual completion time while legacy card titles retain update time',()=>{
+test('Markdown and native card footers use actual completion time',()=>{
  assert.equal(uiTime('2026-10-04T01:02:03.123456Z'),'2026-10-04 09:02:03');
  const task={...fixture,title:'虚构/演示任务',goal:'虚构/演示任务',summary:'虚构/演示任务',status:'completed',blocker:'',steps:[],checks:[],results:[],completion:{at:'2026-10-04T01:02:03Z',summary:'演示成果已核对'},updated_at:'2026-10-04T01:03:04Z'};
  const now=new Date('2026-10-04T01:04:05Z');
  const detail=render_task(task,config,template('task-detail.md'),now,'zh');
  assert.equal(detail.split('\n')[0],'# 虚构/演示任务');assert.equal(detail.split(task.title).length-1,1);assert.doesNotMatch(detail,/ID: task-legacy/);assert.match(detail,/已完成/);assert.match(detail,/完成于：2026-10-04 09:02:03/);assert.doesNotMatch(detail,/09:03:04/);
  const list=render_list([task],config,template('list.md'),false,now,true,'zh');assert.match(list,/核对于：2026-10-04 09:04:05/);assert.ok(list.lastIndexOf('09:04:05')>list.indexOf(task.title));
- const adapter=createConnector({server:fileURLToPath(new URL('../scripts/taskctl.mjs',import.meta.url)),config_ref:'/tmp/unused-fixture',state_dir:'/tmp',account_id:'fixture',brand:'feishu'});
- const card=adapter.render('card',taskDocument([task]));assert.equal(card.header.title.content,task.title+' · 2026-10-04 09:03:04');assert.ok(card.elements.every(e=>e.tag!=='column_set'));
+ const card=renderConnectorDocument({presentation:'feishu'},'card',taskResponseDocument([task]));assert.equal(card.header.title.content,task.title);
+ assert.match(JSON.stringify(card),/完成于：2026-10-04 09:02:03/);assert.doesNotMatch(JSON.stringify(card),/09:03:04/);
 });
 test('receipt thread identifiers are bounded context, never coerced or confused with acceptance',()=>{
  const receipt=sendResult({status:'api_accepted',idempotency_key:'key',message_id:'message',thread_id:'thread',root_id:'root',parent_id:'parent'},'key');
@@ -42,20 +39,19 @@ test('receipt thread identifiers are bounded context, never coerced or confused 
 
 test('failed cards preserve the outcome reason and useful next action despite an older summary',()=>{
  const task={...fixture,title:'虚构/演示失败任务',goal:'核对演示结果',summary:'之前正在整理资料',status:'failed',blocker:'',checks:[],results:[],next_action:'修正格式后重新提交',events:[...fixture.events,{kind:'status',at:'2026-10-04T01:02:03Z',text:'executing -> failed: 请求格式校验失败'}]};
- const detail=taskDocument([task],'zh');
- assert.match(detail.details.join('\n'),/❌ 失败/);
- assert.match(detail.details.join('\n'),/请求格式校验失败/);
- assert.match(detail.details.join('\n'),/下一步：修正格式后重新提交/);
- const list=taskDocument([task],'zh',false);
- assert.match(list.rows[0][2],/请求格式校验失败/);
+ const detail=taskResponseDocument([task],'zh').response;
+ assert.equal(detail.status,'失败');assert.match(JSON.stringify(detail.sections),/请求格式校验失败/);
+ assert.ok(detail.sections.some(s=>s.title==='下一步'&&s.items.includes('修正格式后重新提交')));
+ const list=taskResponseDocument([task],'zh',false);
+ assert.equal(list.response.items.length,0);
 });
 
 
-test('structured task-list projection bounds both legacy rows and semantic items to ten active records',()=>{
+test('structured task-list projection bounds semantic items to ten active records',()=>{
  for(const count of [0,1,21]){
   const tasks=Array.from({length:count},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'Reviewed summary',blocker:'',checks:[],results:[]}));
   const doc=taskResponseDocument(tasks,'en',false);
-  assert.equal(doc.rows.length,Math.min(count,10));assert.equal(doc.response.template,'list');assert.equal(doc.response.items.length,Math.min(count,10));
+  assert.equal(doc.response.template,'list');assert.equal(doc.response.items.length,Math.min(count,10));
   assert.deepEqual(doc.response.coverage,{shown:Math.min(count,10),total:null});
  }
 });
@@ -63,7 +59,7 @@ test('structured task-list projection bounds both legacy rows and semantic items
 test('oversized task projections explicitly mark clipped content and preserve accurate item coverage',()=>{
  const tasks=Array.from({length:20},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'字'.repeat(2000),blocker:'',checks:[],results:[]}));
  const doc=taskResponseDocument(tasks,'en',false);
- assert.equal(doc.rows.length,10);assert.ok(doc.response.items.length>0&&doc.response.items.length<=10);
+ assert.ok(doc.response.items.length>0&&doc.response.items.length<=10);
  assert.deepEqual(doc.response.coverage,{shown:doc.response.items.length,total:null});
  assert.ok(doc.response.items.every(item=>item.summary.includes('partial; inspect task details')));
  assert.ok(Buffer.byteLength(JSON.stringify(doc.response))<=24*1024);
@@ -74,7 +70,7 @@ test('structured detail preserves blockers, current failed checks, next action a
   checks:[{name:'Old failure',outcome:'fail',evidence:'Stale',work_revision:fixture.work_revision-1},...Array.from({length:4},(_,i)=>({name:'Current check '+i,outcome:'fail',evidence:'Required evidence '+i,work_revision:fixture.work_revision}))],
   results:[{label:'Verified document',url:'https://example.com/report'},{label:'Unsafe link',url:'javascript:alert(1)'}]};
  const doc=taskResponseDocument([task],'en'),response=doc.response, sections=JSON.stringify(response.sections);
- assert.equal(response.template,'detail');assert.deepEqual(doc.columns,[]);assert.deepEqual(doc.rows,[]);
+ assert.equal(response.template,'detail');assert.deepEqual(Object.keys(doc).sort(),['response','updated_at']);
  assert.match(sections,/Confirm scope/);assert.match(sections,/Choose the target version/);assert.match(sections,/Current check 0/);assert.doesNotMatch(sections,/Old failure/);
  assert.match(sections,/More failed checks omitted/);assert.match(sections,/1 result links omitted/);
  assert.deepEqual(response.links,[{label:'Verified document',url:'https://example.com/report'}]);

@@ -1,6 +1,6 @@
 ---
 name: feishu-message-server
-description: Configure and start a Node.js Feishu message server on the user's selected service host. Use direct execution on dot with a dot-local configuration, or remote-config-bridge for explicitly requested computer hosting. Receive private messages and group mentions; send or reply with text, Markdown, or cards when requested. Use for setup, startup, inbox inspection, messaging, troubleshooting, and migration.
+description: Configure and start a Node.js Feishu message server on the user's selected service host. Use direct execution on dot with a dot-local configuration, or remote-config-bridge for explicitly requested computer hosting. Receive private messages and group mentions; send or reply with text, Markdown, or cards and add message reactions when requested. Use for setup, startup, inbox inspection, messaging, troubleshooting, and migration.
 ---
 
 # Feishu Message Server
@@ -91,6 +91,10 @@ Keep confirmed mappings and their evidence in the conversation and existing priv
 Preserve the CLI's safe `error_type`, allowlisted `error_code`, `request_phase`, and per-request `elapsed_ms` when present. Never expose raw exceptions, request/response dumps, credentials, headers, or message bodies as diagnostics. If a tool approval is pending, rejected, or interrupted before execution, report that tool state separately from Feishu results. An interrupted tool result without execution evidence cannot establish an API timeout or delivery outcome.
 
 Sending never retries automatically. The resident durably records dispatch intent and terminal/unknown results before reporting them; a repeated key replays its stored result and a key with changed content is rejected. In-flight, interrupted, or unknown outcomes are not redispatched automatically. Preserve the resident operation journal through restarts. For an authorized retry of the same operation, preserve the exact destination and ID type, text, reply options, and returned `idempotency_key`. A change to the text or destination is a new message and needs a new key; do not add a timestamp or otherwise alter content during a retry. If the original key is unavailable after an uncertain attempt, report the duplicate risk and clarify before resending.
+
+### Explicit message reactions
+
+For an authorized reaction, use `bash feishu.sh react --config "$CONFIG_FILE" --message-id "$MESSAGE_ID" --emoji-type Get --idempotency-key "$KEY"`. `Get` is case-sensitive. Normal reactions reuse the matching resident client and durable operation journal. Success returns `reaction_id`, not a new message ID. No receiver hook reacts automatically; Manage Dot Tasks owns the first-text/subsequent-reaction topic policy. Missing reaction permission is an API error, not permission to send replacement text. See [interface and reaction permissions](references/interface.md).
 
 ### Task connector interface
 

@@ -1,6 +1,6 @@
 # Resident service
 
-The resident keeps the receiver, official SDK client, authentication-token cache and network pool in one explicitly started host-local process. Normal send/reply CLI calls reuse that process instead of constructing another client. The service receives/stores/transmits only: it does not interpret tasks, reply automatically, execute shell commands, or grant permission to send.
+The resident keeps the receiver, official SDK client, authentication-token cache and network pool in one explicitly started host-local process. Normal send/reply/react CLI calls reuse that process instead of constructing another client. The service receives/stores/transmits only: it does not interpret tasks, reply automatically, execute shell commands, or grant permission to send.
 
 ## Select and reuse the correct service
 
@@ -8,7 +8,7 @@ Choose the service host and pin the trusted runtime before any activation, follo
 
 - `--state-dir DIR` selects the receiver's inbox, log and receiver lock.
 - `--resident-dir DIR` selects the resident directory. Its default is `STATE_DIR/resident`.
-- `send`, `reply`, and `health` require a matching resident by default. Missing/unhealthy service, unsupported identity, and failed local transport are blockers; there is no implicit startup, account switch, or standalone fallback.
+- `send`, `reply`, `react`, and `health` require a matching resident by default. Missing/unhealthy service, unsupported identity, and failed local transport are blockers; there is no implicit startup, account switch, or standalone fallback.
 - Without an explicit `--resident-dir`, `capabilities`, `identity`, `inbox`, and `inbox-page` retain their local inspection behavior. Capability inspection needs no app credentials; local inbox inspection stays read-only. Supplying `--resident-dir` explicitly queries the service instead and requires matching account configuration.
 - `--standalone` is an explicit bypass for the original direct listener or one-shot command. It creates a separate sender client and does not inherit the resident's durable send journal. Never use it as an automatic recovery or unknown-result workaround.
 - `--isolated` requires explicitly selected, distinct `--resident-dir` and `--state-dir` values. It does not authorize a second production receiver or solve an unhealthy shared instance. Concurrent connections for one app can affect which receiver obtains events.
@@ -95,3 +95,5 @@ Passing these tests establishes only the exercised local behavior. It does not p
 For a request limited to validation on dot followed by stopping, complete the local checks, stop the test process, verify its endpoint/lock cleanup, report the results and remaining coverage limits, and stop. Do not deploy, auto-start on login, provision production credentials, replace the active skill, connect a real account, or send a test message as a validation side effect.
 
 Separate dot exec calls may share files but have different network and PID namespaces. An endpoint file or PID is not proof that another call can reach localhost. Keep receiver and consumer commands in one persistent tool session when required; inspect health from that consumer session. Never kill a PID obtained from another namespace or delete its lock to force recovery. A session supervisor may stop only its own child receiver; reused instances retain their original owner.
+
+`react` uses the same durable intent/result journal as send/reply. Its fingerprint includes the exact incoming message ID, case-sensitive emoji and operation key. It returns a reaction ID, never a bot-message ID. Interrupted/unknown reactions are not automatically retried or replaced with text.

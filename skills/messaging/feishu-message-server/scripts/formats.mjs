@@ -3,7 +3,7 @@ import { SafeError } from './config.mjs';
 
 export const CAPABILITIES = Object.freeze({protocol_version: 1, name: 'feishu-message-server',
   formats: ['text', 'markdown', 'card'], send: true, reply: true, receive: true, durable_cursor: true,
-  delivery_receipts: 'api_acceptance_only', automatic_retry: false});
+  presentation:'feishu', react:true, delivery_receipts: 'api_acceptance_only', automatic_retry: false});
 
 export function formatContent(format, input) {
   if (format === 'text') return {msg_type: 'text', content: JSON.stringify({text: input})};

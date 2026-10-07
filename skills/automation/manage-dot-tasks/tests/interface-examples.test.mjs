@@ -8,7 +8,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {run, parse_args} from '../scripts/taskctl.mjs';
 import {createConnector} from '../scripts/connectors/feishu.mjs';
 import {capabilities, sendResult} from '../scripts/connectors/contract.mjs';
-import {responseDocument} from '../scripts/reply-presentation.mjs';
+import {responseDocument, renderConnectorDocument} from '../scripts/reply-presentation.mjs';
 const ROOT=fileURLToPath(new URL('..',import.meta.url));
 const json=p=>JSON.parse(fs.readFileSync(p,'utf8'));
 const schema=json(path.join(ROOT,'references/connector-protocol.schema.json'));
@@ -45,12 +45,17 @@ test('documented CLI transcript executes with no credentials and normalized reco
   for(const raw of [null,{status:'api_accepted',idempotency_key:'key',message_id:'bad\nID'},{status:'api_accepted',idempotency_key:'wrong',message_id:'id'}]) assert.equal(sendResult(raw,'key').status,'delivery_unknown');
 });
 
-test('Feishu renders native columns and explicit escaped Markdown/plain text without executing task content',t=>{
+test('presentation routing renders safe native cards and Markdown while adapters only transport',t=>{
   const tmp=fixture(t),adapter=createConnector({server:path.join(ROOT,'scripts/taskctl.mjs'),config_ref:path.join(tmp,'unused-config'),state_dir:tmp,account_id:'fixture-app',brand:'feishu'});
-  const doc={title:'Tasks',updated_at:'2026-01-01T00:00:00Z',columns:['Title','Status','Summary'],rows:[['用户 | <at id=all>','🚧','$(do-not-run) **private**']],details:['Failed: requested result not met']};
-  const card=adapter.render('card',doc); assert.equal(card.elements[1].tag,'column_set');assert.equal(card.elements[1].columns.length,3);assert.equal(card.elements[1].columns[0].elements[0].text.tag,'plain_text');
-  assert.equal(card.elements[1].columns[0].elements[0].text.content,doc.rows[0][0]);assert.match(adapter.render('markdown',doc),/&lt;at id=all&gt;/);assert.doesNotMatch(adapter.render('markdown',doc),/^\|/m);
-  assert.match(adapter.render('text',doc),/用户 \|/);assert.throws(()=>adapter.render('html',doc),/Unsupported/);
+  assert.equal(adapter.render,undefined);
+  const doc=responseDocument({template:'detail',title:'Tasks',lead:'Failed: requested result not met',items:[{title:'用户 | <at id=all>',status:'执行中',summary:'$(do-not-run) **private**'}]});
+  const render=format=>renderConnectorDocument({presentation:'feishu'},format,doc),card=render('card');
+  assert.equal(card.elements[1].columns[0].elements[0].text.tag,'plain_text');
+  assert.equal(card.elements[1].columns[0].elements[0].text.content,doc.response.items[0].title);
+  assert.match(render('markdown'),/‹at id=all›/);assert.doesNotMatch(render('markdown'),/^\|/m);
+  assert.match(render('text'),/用户 \|/);assert.throws(()=>render('html'),/Unsupported/);
+  assert.equal(renderConnectorDocument({},'markdown',doc),render('markdown'));
+  assert.throws(()=>renderConnectorDocument({},'card',doc),/Unsupported/);
 });
 
 test('bundled Feishu adapter uses the actual server capability and cursor commands when companion is available',async t=>{

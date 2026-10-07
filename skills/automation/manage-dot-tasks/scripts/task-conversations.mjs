@@ -5,7 +5,8 @@ import {readIntegration} from './integration.mjs';
 import {grantCovers} from './message-inbox.mjs';
 import {grantForMessage} from './received-intake.mjs';
 import {digest, requireText, loadConnector, bounded, sendResult, ConnectorError} from './connectors/contract.mjs';
-import {responseDocument, validateResponse, renderResponse} from './reply-presentation.mjs';
+import {responseDocument, validateResponse, renderResponse, renderConnectorDocument} from './reply-presentation.mjs';
+import {taskNotificationDocument} from './presentation.mjs';
 
 export const CONVERSATION_OPTIONS = {
   'conversation-bind':['file'], 'conversation-show':[], 'conversation-disable':[],
@@ -82,10 +83,11 @@ export function canonicalDecision(store, entry, decision, taskId) {
 export function conversationCompletionWrites(store,task,previous) {
   if(!previous||task.status!=='completed'||previous.status==='completed')return {};
   const d=readConversations(store),b=d.bindings.find(b=>b.id===task.id&&b.enabled);if(!b)return {};
-  try{active(store,b);}catch{return {};}
+  let g;try{({g}=active(store,b));}catch{return {};}
   const id='task-completion-'+digest([task.id,task.work_revision]).slice(0,40);if(d.messages.some(m=>m.id===id))return {};
   text(task.completion.summary);
-  message(d,b,{id,kind:'completed',text:task.completion.summary,format:'text',privacy:'reviewed',audience:'shared',completion_work_revision:task.work_revision});
+  const {response}=taskNotificationDocument(task,g.language??'zh');
+  message(d,b,{id,kind:'completed',text:response.lead,response,format:g.format,privacy:'reviewed',audience:'shared',completion_work_revision:task.work_revision});
   return {'conversations.json':encode(d)};
 }
 function message(d,b,m,channels=b.channels) {
@@ -231,7 +233,7 @@ export function createConversations({store}) {
         snapshot=await locked(d=>{const b=binding(d,n.task_id);return {...active(store,b),b};});
         ({adapter}=await bounded(()=>loadConnector(snapshot.c),15000));format=n.message.format;
         if(!snapshot.c.capabilities.formats.includes(format))fail('Unsupported message format');
-        body=adapter.render(format,responseDocument(n.message.response??{template:'detail',title:({question:'Question',question_update:'Updated question',blocked:'Action needed',completed:'Task result',user_message:'User message'})[n.message.kind]??'Task conversation',lead:n.message.text}));
+        body=renderConnectorDocument(snapshot.c.capabilities,format,responseDocument(n.message.response??{template:'detail',title:({question:'Question',question_update:'Updated question',blocked:'Action needed',completed:'Task result',user_message:'User message'})[n.message.kind]??'Task conversation',lead:n.message.text}));
         if(body===undefined||Buffer.byteLength(JSON.stringify(body))>28000)fail('Rendered message exceeds bounds');
       } catch {results.push(await receipt(n.id,n.lease.token,{status:'not_sent',idempotency_key:n.id,retryable:false,error_code:'adapter-preflight-failed'}));continue;}
       await begin(n.id,n.lease.token);let result;

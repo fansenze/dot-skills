@@ -1,8 +1,8 @@
 import {readConversations, conversationContext, ownsConversationRoute, conversationCompletionWrites, createConversations} from './task-conversations.mjs';
-import {responseDocument, responseFormat} from './reply-presentation.mjs';
+import {responseDocument, responseFormat, renderConnectorDocument, receiptPresentation, validReceiptPresentation} from './reply-presentation.mjs';
 import {validateHandshakes, expireHandshakes, handshakeCommand, matchHandshake} from './identity-handshake.mjs';
 import {grantMatches, grantForMessage, configureAllSenders, validateAllSenders, messageTrigger} from './received-intake.mjs';
-import {taskResponseDocument as document} from './presentation.mjs';
+import {taskResponseDocument as document, taskNotificationDocument} from './presentation.mjs';
 /** Transactional notifications and explicitly authorized agent/command intake. */
 import {createMessageInbox, agentMessage, grantCovers, messageText, messageEnvelope, validateMessages, validateContextGrants, requestFailureDocument} from './message-inbox.mjs';
 import fs from 'node:fs';
@@ -19,7 +19,7 @@ export const INTEGRATION_OPTIONS = {
   'message-next': ['consumer', 'limit', 'lease-ms'], 'message-renew': ['token', 'lease-ms'], 'message-record': ['token', 'decision-file'], 'message-ack': ['token'], 'message-fail': ['token', 'stage', 'reason'],
   'deny-inbound': [], 'request-failure': ['stage', 'reason', 'evidence'], outbox: ['all'], inbound: [],
   ingest: ['connector', 'limit'], deliver: ['consumer', 'limit', 'lease-ms'],
-  'retry-notice': ['reason'], 'resolve-notice': ['status', 'message-id', 'evidence'],
+  'retry-notice': ['reason'], 'resolve-notice': ['status', 'message-id', 'reaction-id', 'evidence'],
   start: ['consumer', 'timeout-ms', 'lease-ms', 'limit'],
 };
 export const INTEGRATION_IDS = ['handshake-status', 'handshake-cancel', 'disconnect', 'unwatch', 'deny-inbound', 'retry-notice', 'resolve-notice', 'message-renew', 'message-record', 'message-ack', 'message-fail', 'request-failure'];
@@ -69,6 +69,11 @@ export function readIntegration(store) {
     const c = data.connections.find(c => c.id === n.route.connector_id), p = policies.find(p => p.id === n.route.policy_id);
     const origin = p?.all_senders ? data.inbox.find(r => r.id === n.route.inbound_id && r.grant_id === p.id && r.connector === c.id) : null;
     if (!p || p.connector !== c.id || (p.all_senders && !origin) || digest(n.route) !== digest(routeFor(c, p, origin)) || n.id !== 'notice-' + digest([n.event_id, n.route]).slice(0, 40)) throw new ConnectorError('Notification route integrity failed');
+    if (n.operation !== undefined && n.operation !== 'react') throw new ConnectorError('Invalid notification operation');
+    if (n.operation === 'react') {
+      const incoming = data.inbox.find(r=>'received:'+r.id===n.event_id && r.grant_id===p.id && r.binding===c.binding);
+      if (!validReceiptPresentation(c.capabilities,n,incoming) || n.reply_to || n.reply_in_thread || n.wire_format!==undefined || (n.wire_body!==undefined && digest(n.wire_body)!==digest(n.reaction))) throw new ConnectorError('Invalid receipt reaction');
+    } else if (n.reaction !== undefined) throw new ConnectorError('Unexpected receipt reaction');
     if (n.wire_format !== undefined && (!c.capabilities.formats.includes(n.wire_format) || n.wire_format !== responseFormat(n.document,n.route.format,c.capabilities))) throw new ConnectorError('Notification wire format integrity failed');
     if (n.reply_in_thread !== undefined && (typeof n.reply_in_thread !== 'boolean' || !n.reply_to)) throw new ConnectorError('Invalid reply options');
     if (n.attempts < 0 || !Number.isFinite(Date.parse(n.available_at)) || (n.lease && !Number.isFinite(Date.parse(n.lease.until)))) throw new ConnectorError('Invalid notification recovery state');
@@ -95,11 +100,11 @@ export function decorateNotifications(store, tasks, language = 'en') {
   });
 }
 const writes = data => ({'integration.json': encode(data)});
-function enqueue(data, eventId, route, doc, taskId = null, replyTo = null, replyInThread = false) {
+function enqueue(data, eventId, route, doc, taskId = null, replyTo = null, replyInThread = false, reaction = null) {
   const noticeId = 'notice-' + digest([eventId, route]).slice(0, 40);
   if (data.outbox.some(n => n.id === noticeId)) return;
   data.outbox.push({id: noticeId, key: noticeId, event_id: eventId, task_id: taskId, route: structuredClone(route),
-    document: doc, reply_to: replyTo, ...(replyInThread ? {reply_in_thread:true} : {}), state: 'pending', attempts: 0, max_attempts: 3, available_at: stamp(),
+    document: doc, reply_to: replyTo, ...(reaction ? {operation:'react',reaction} : {}), ...(replyInThread ? {reply_in_thread:true} : {}), state: 'pending', attempts: 0, max_attempts: 3, available_at: stamp(),
     lease: null, intent: null, receipt: null, history: [], created_at: stamp()});
 }
 const routeFor = (connection, policy, entry = null) => ({connector_id: connection.id, binding: connection.binding, policy_id: policy.id,
@@ -128,7 +133,7 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
       return g?.enabled && g.updates && g.reply_mode === 'reply' && g.account === watch.account && g.destination === watch.destination && (watch.destination_type ?? 'chat_id') === 'chat_id' && grantCovers(data,g,task.id);
     });
     const replyTo = connection.capabilities.reply && associated ? associated.envelope.message_id : null;
-    enqueue(data, `task:${task.id}:${task.revision}`, routeFor(connection, watch), document([task], watch.language), task.id, replyTo, Boolean(replyTo));
+    enqueue(data, `task:${task.id}:${task.revision}`, routeFor(connection, watch), taskNotificationDocument(task, watch.language), task.id, replyTo, Boolean(replyTo));
     watchedRoutes.push(routeFor(connection, watch));
     changed = true;
   }
@@ -149,7 +154,7 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
       if (watchedRoutes.some(w => w.connector_id === route.connector_id && w.binding === route.binding &&
         w.account_id === route.account_id && w.destination.id === route.destination.id &&
         w.destination.type === route.destination.type && w.format === route.format)) continue;
-      enqueue(data, 'task:'+task.id+':'+task.revision, route, document([task], grant.language ?? 'zh'), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null, grant.reply_mode === 'reply');
+      enqueue(data, 'task:'+task.id+':'+task.revision, route, taskNotificationDocument(task, grant.language ?? 'zh'), task.id, grant.reply_mode === 'reply' ? anchor.envelope.message_id : null, grant.reply_mode === 'reply');
       changed = true;
     }
   }
@@ -161,7 +166,7 @@ export function createIntegration({store, scheduler, makeTask}) {
   const save = data => store.commit(writes(data));
   const messages = createMessageInbox({store,scheduler,makeTask,read:readIntegration,save,writes,routeFor,enqueue,document,taskNotices:taskNotificationWrites});
   const publicNotice = n => ({id: n.id, event_id: n.event_id, task_id: n.task_id, route: n.route, state: n.state,
-    attempts: n.attempts, available_at: n.available_at, receipt: n.receipt});
+    ...(n.operation ? {operation:n.operation,reaction:n.reaction} : {}), attempts: n.attempts, available_at: n.available_at, receipt: n.receipt});
   function policyActive(data, notice) {
     const c = data.connections.find(c => c.id === notice.route.connector_id);
     const policy = [...data.watches, ...data.grants].find(p => p.id === notice.route.policy_id && p.connector === c?.id);
@@ -186,7 +191,7 @@ export function createIntegration({store, scheduler, makeTask}) {
       const data = readIntegration(store); let changed = false;
       for (const n of data.outbox) {
         if (!n.lease || Date.parse(n.lease.until) > Date.now()) continue;
-        if (n.state === 'sending') { n.receipt = sendResult(null, n.key); n.receipt.error_code = 'sender-interrupted'; finish(n); }
+        if (n.state === 'sending') { n.receipt = sendResult(null, n.key, n.operation); n.receipt.error_code = 'sender-interrupted'; finish(n); }
         else if (n.state === 'recorded') finish(n);
         else if (n.state === 'claimed') { n.state = n.attempts >= n.max_attempts ? 'dead' : 'pending'; n.lease = null; }
         changed = true;
@@ -215,7 +220,7 @@ export function createIntegration({store, scheduler, makeTask}) {
   }
   async function record(noticeId, token, raw) {
     return locked(() => {
-      const data = readIntegration(store), n = getLease(data, noticeId, token), result = sendResult(raw, n.key);
+      const data = readIntegration(store), n = getLease(data, noticeId, token), result = sendResult(raw, n.key, n.operation);
       if (n.state === 'recorded' && digest(n.receipt) === digest(result)) return n.receipt;
       if (!['sending', 'claimed'].includes(n.state) || (n.state === 'claimed' && result.status !== 'not_sent')) throw new ConnectorError('Invalid notification receipt transition');
       n.receipt = result; n.state = 'recorded'; save(data); return result;
@@ -238,8 +243,8 @@ export function createIntegration({store, scheduler, makeTask}) {
       try {
         const c = await locked(() => readIntegration(store).connections.find(c => c.id === n.route.connector_id));
         ({adapter} = await bounded(() => loadConnector(c), 15000));
-        format = n.wire_format ?? responseFormat(n.document, n.route.format, c.capabilities);
-        body = n.wire_body ?? adapter.render(format, structuredClone(n.document));
+        format = n.operation === 'react' ? undefined : n.wire_format ?? responseFormat(n.document, n.route.format, c.capabilities);
+        body = n.wire_body ?? (n.operation === 'react' ? n.reaction : renderConnectorDocument(c.capabilities,format,structuredClone(n.document)));
         if (body === undefined || Buffer.byteLength(JSON.stringify(body)) > 28000) throw new ConnectorError('Notification render exceeds bounds');
       } catch {
         await record(n.id, n.lease.token, {status: 'not_sent', idempotency_key: n.key, retryable: false, error_code: 'adapter-preflight-failed'});
@@ -248,7 +253,7 @@ export function createIntegration({store, scheduler, makeTask}) {
       const intent = await begin(n.id, n.lease.token, body, format);
       let result;
       try {
-        result = await bounded(signal => adapter[intent.reply_to ? 'reply' : 'send']({account_id: intent.route.account_id,
+        result = await bounded(signal => intent.operation === 'react' ? adapter.react({account_id:intent.route.account_id,...intent.wire_body,idempotency_key:intent.key},{signal}) : adapter[intent.reply_to ? 'reply' : 'send']({account_id: intent.route.account_id,
           destination: intent.route.destination, format: intent.wire_format ?? intent.route.format, body: intent.wire_body,
           reply_to: intent.reply_to, ...(intent.reply_in_thread !== undefined ? {reply_in_thread:intent.reply_in_thread} : {}), idempotency_key: intent.key}, {signal}));
       } catch { result = null; }
@@ -325,7 +330,9 @@ export function createIntegration({store, scheduler, makeTask}) {
           }
           Object.assign(entry, {mode:'agent', grant_id:grant.id, binding:currentConnection.binding, envelope:messageEnvelope(e), status:'pending', reason:'awaiting-agent', lease:null, decision:null});
           const zh = (grant.language ?? 'zh') === 'zh';
-          if(!conversationContext(store,entry).matches.length)enqueue(data, 'received:'+messageKey, routeFor(currentConnection, grant, entry), responseDocument({template:'ack',lead:zh?'收到，正在处理。':'Received; I am reviewing your request.'},stamp()), null, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
+          const receipt = receiptPresentation(currentConnection.capabilities,{entry,history:data.inbox,notices:data.outbox,conversation:conversationContext(store,entry)});
+          if (receipt) enqueue(data,'received:'+messageKey,routeFor(currentConnection,grant,entry),responseDocument({template:'ack',lead:zh?'收到，正在处理。':'Received; I am reviewing your request.'},stamp()),null,
+            receipt.operation==='react' ? null : grant.reply_mode==='reply' ? e.message_id : null,receipt.operation!=='react' && grant.reply_mode==='reply',receipt.reaction ?? null);
           save(data); return;
         }
         if (command.task_id && !store.index().some(t => t.id === command.task_id)) { entry.reason = 'unknown-task'; save(data); return; }
@@ -429,7 +436,7 @@ export function createIntegration({store, scheduler, makeTask}) {
         const c = data.connections.find(c => c.id === args.connector && c.enabled); if (!c) throw new ConnectorError('Unknown or disabled connector');
         const allSenders = cmd === 'allow-inbound' && args.all_senders;
         const p = {id: id(args.id), connector: c.id, account: requireText(args.account, 'account'), ...(!allSenders ? {destination: requireText(args.destination, 'destination')} : {}),
-          destination_type: args.destination_type ?? 'chat_id', format: args.format ?? 'card', tasks: taskScope(args.tasks), enabled: true};
+          destination_type: args.destination_type ?? 'chat_id', format: args.format ?? (c.capabilities.presentation === 'feishu' ? 'card' : 'markdown'), tasks: taskScope(args.tasks), enabled: true};
         if (!['text', 'markdown', 'card'].includes(p.format)) throw new ConnectorError('Unsupported notification format');
         const requireOutbound = method => {
           if (!c.capabilities[method] || !c.capabilities.formats.includes(p.format)) throw new ConnectorError(`Requested format/${method} capability unavailable; choose an explicit supported format`);
@@ -481,8 +488,9 @@ export function createIntegration({store, scheduler, makeTask}) {
         if (n.state !== 'delivery_unknown') throw new ConnectorError('Only unknown delivery requires reconciliation');
         requireText(args.evidence, 'reconciliation evidence', 1000);
         if (!['api_accepted', 'not_sent'].includes(args.status)) throw new ConnectorError('Resolution must establish API acceptance or no send');
-        if (args.status === 'api_accepted') requireText(args.message_id, 'actual message ID');
-        n.receipt = {status: args.status, idempotency_key: n.key, retryable: false, ...(args.message_id ? {message_id: args.message_id} : {})};
+        const resultId = n.operation === 'react' ? 'reaction_id' : 'message_id';
+        if (args.status === 'api_accepted') requireText(args[resultId], 'actual '+resultId);
+        n.receipt = {status: args.status, idempotency_key: n.key, retryable: false, ...(args[resultId] ? {[resultId]:args[resultId]} : {})};
         n.history.push({at: stamp(), resolution: args.evidence}); finish(n);
       } else throw new ConnectorError('Unknown integration command');
       save(data); return publicNotice(n);

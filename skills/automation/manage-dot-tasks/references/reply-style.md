@@ -6,6 +6,8 @@ These references accompany the user's message before dot drafts a Feishu reply. 
 
 Use Markdown by default in ordinary dot/local conversations without an active Feishu reply route. For the selected, started Feishu integration, record a semantic `response` and use its native-card route. Keep the same content hierarchy and facts in both: distinct status groups, task titles followed by concise descriptions, useful detail sections and footer time. Markdown uses headings, whitespace and rules between groups; cards use native components. Do not paste card JSON into chat or send Markdown source as a card's plain content. Existing explicit per-message format requests still take precedence. An installed or unused connection is not permission to start it or redirect a reply.
 
+For automatic completion notifications, write a concise user-facing completion summary. Describe the result and useful timing; keep raw acceptance evidence, scheduler syntax and implementation logs in the ledger. Do not repeat the durable receipt in a substantive response. Feishu topic follow-ups use the `Get` reaction as their receipt; the first topic message retains the short text receipt.
+
 ## Style
 
 - Answer the actual question first, in the user's language. An ordinary answer can be a short paragraph without a task title or a status report.

@@ -23,7 +23,7 @@ test('all five response templates validate and retain multiline semantic content
   assert.doesNotThrow(()=>validateResponse(response));
   const doc=responseDocument(response,time);
   assert.deepEqual(doc.response,response);assert.equal(doc.updated_at,time);
-  for(const key of ['columns','rows','details'])assert.ok(Array.isArray(doc[key]),key+' retains legacy adapter shape');
+  assert.deepEqual(Object.keys(doc).sort(),['response','updated_at']);
   for(const format of ['text','markdown','card']){
    const output=renderResponse(response,format);
    assert.equal(typeof output,format==='card'?'object':'string');
@@ -127,7 +127,7 @@ test('format choice honors per-message authorization, supported capabilities and
  assert.equal(responseFormat(ackDoc,'card',caps),'text');
  assert.equal(responseFormat(ackDoc,'card',{formats:['card']}),'card');
  assert.equal(responseFormat(detailDoc,'card',caps),'card');
- assert.equal(responseFormat({title:'Legacy',columns:[],rows:[],details:[]},'markdown',caps),'markdown');
+ assert.throws(()=>responseFormat({},'markdown',caps),/Invalid response/);
  for(const format of ['text','markdown','card']){
   const doc=responseDocument({...samples.detail,format_override:{format,authorization_ref:'verified-user-message'}},time);
   assert.equal(responseFormat(doc,'card',caps),format);
@@ -195,11 +195,12 @@ test('default Markdown and native cards preserve the same bounded list with dist
  assert.equal(groups.length,2);assert.ok(groups.every(e=>e.margin==='24px 0px 12px 0px'));
  assert.equal(card.elements[card.elements.indexOf(groups[1])-1].tag,'hr');
  for(const rendered of [markdown,stringContents(card).join('\n')]){
-  for(const value of ['Release notes','Guide','Confirm the scope','Checking installation','2026-10-07 09:02:03','Asia/Shanghai'])assert.ok(rendered.includes(value),value);
+  for(const value of ['Release notes','Guide','Confirm the scope','Checking installation','2026-10-07 09:02:03'])assert.ok(rendered.includes(value),value);
   assert.doesNotMatch(rendered,/已完整展示|2\/2/);
   assert.equal(rendered.split('Blocked').length-1,1,'group label is not repeated on each item');
  }
- assert.equal(card.elements.at(-1).tag,'note');assert.match(card.elements.at(-1).elements[0].content,/Checked/);
+ assert.match(markdown,/Asia\/Shanghai/); assert.ok(stringContents(card).some(s=>s.includes('北京时间')));
+ assert.ok(stringContents(card.elements.at(-1)).some(s=>s.includes('Checked')));
  assert.doesNotMatch(card.header.title.content,/2026/);
  for(const invalid of [
   {...response,coverage:{shown:3,total:null}},

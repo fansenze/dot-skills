@@ -2,7 +2,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {renderResponse} from '../../scripts/reply-presentation.mjs';
 
 export function createConnector(settings) {
   const read = (name, fallback) => { try { return fs.readFileSync(path.join(settings.root,name),'utf8'); } catch { return fallback; } };
@@ -23,8 +22,7 @@ export function createConnector(settings) {
     return {status:'api_accepted',idempotency_key:message.idempotency_key,message_id,parent_id:message.reply_to,root_id:message.reply_to,thread_id:'synthetic-thread'};
   }
   return {
-    capabilities:()=>({protocol_version:1,name:'conversation-fixture',formats:settings.formats??['text','markdown','card'],send:true,reply:settings.reply??true,receive:true,durable_cursor:true}),
-    render:(format,document)=>document.response?renderResponse(document.response,format):[document.title,...(document.details??[])].join('\n'),
+    capabilities:()=>({presentation:'feishu',protocol_version:1,name:'conversation-fixture',formats:settings.formats??['text','markdown','card'],send:true,reply:settings.reply??true,receive:true,durable_cursor:true}),
     send:reply,reply:settings.reply===false?undefined:reply,
     receive:async({cursor,limit})=>{const rows=JSON.parse(read('inbox.json','[]')),start=cursor===null?0:Number(cursor),events=rows.slice(start,start+limit).map((e,i)=>({...e,cursor:String(start+i+1)}));return {events,next_cursor:String(start+events.length),has_more:start+events.length<rows.length};},
   };

@@ -44,6 +44,7 @@ const bootstrap = f => `import fs from 'node:fs'; import * as m from ${JSON.stri
 import {createIntegration} from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'scripts/integration.mjs')).href)};
 import {create_scheduler} from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'scripts/scheduler.mjs')).href)};
 import {loadConnector} from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'scripts/connectors/contract.mjs')).href)};
+import {renderConnectorDocument} from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'scripts/reply-presentation.mjs')).href)};
 const store=new m.Store(${JSON.stringify(f.root)}); const integration=createIntegration({store,scheduler:create_scheduler({...m,store})});`;
 
 test('task changes and outbox recover together after a real process dies mid-journal', async t => {
@@ -84,8 +85,8 @@ for (const phase of ['claim', 'intent', 'effect', 'record', 'ack']) {
     const code = bootstrap(f) + `
 const n=await integration.claim('crash-worker');
 ${phase === 'claim' ? "process.kill(process.pid,'SIGKILL');" : ''}
-const data=JSON.parse(fs.readFileSync(store.path('integration.json'),'utf8'));const {adapter}=await loadConnector(data.connections[0]);
-const body=adapter.render(n.route.format,n.document);await integration.begin(n.id,n.lease.token,body);
+const data=JSON.parse(fs.readFileSync(store.path('integration.json'),'utf8'));const {adapter,capabilities}=await loadConnector(data.connections[0]);
+const body=renderConnectorDocument(capabilities,n.route.format,n.document);await integration.begin(n.id,n.lease.token,body);
 ${phase === 'intent' ? "process.kill(process.pid,'SIGKILL');" : ''}
 const receipt=await adapter.send({body,format:n.route.format,destination:n.route.destination,account_id:n.route.account_id,idempotency_key:n.key});
 ${phase === 'effect' ? "process.kill(process.pid,'SIGKILL');" : ''}

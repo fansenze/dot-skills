@@ -146,8 +146,9 @@ canonical ID. They are not a general progress feed.
 
 The normal verified transition through `complete` atomically records one
 canonical `completed` message for an active binding, using a stable task/work
-revision ID and the completion summary. Review that summary for the bound
-audience before completing the task. Do not publish another completion message
+revision ID and the completion summary. The notification uses the shared completion
+projection (outcome, result links and time) and the grant's selected format.
+Review that content for the bound audience before completing the task. Do not publish another completion message
 to duplicate it; read `conversation-show` and reuse its actual canonical ID when
 linking the result to an intake decision. Explicit `conversation-publish` with `kind: completed` also
 requires an already completed task and never completes one by itself.
@@ -184,9 +185,7 @@ tasks and the last 20 questions and canonical messages for each, with
 `total_matches`, `total_questions`, and `total_messages` counts exposing partial
 coverage. Read `conversation-show` for a task's full ledger. Multiple matches
 require clarification rather than a guess.
-For an exact active bound topic, ingestion suppresses the old automatic intake
-acknowledgement, so `acknowledgement: null` can be expected there. The incoming
-envelope is still durably ingested and must be reviewed normally.
+For an exact active bound topic, default/legacy connectors still suppress the old automatic intake acknowledgement, so `acknowledgement: null` can be expected there. A Feishu channel with reaction support instead follows the [topic receipt policy](feishu-presentation.md): first admitted message gets text, later messages get `Get`. The incoming envelope is still durably ingested and must be reviewed normally; a reaction is not the substantive canonical answer.
 
 When a `message-record` decision refers to an actively bound task, or replies in
 its exact bound topic, first append that verified incoming message through

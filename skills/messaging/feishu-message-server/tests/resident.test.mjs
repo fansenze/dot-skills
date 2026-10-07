@@ -15,6 +15,22 @@ import {findProject} from '../scripts/project.mjs';
 const IDENTITY = () => ({app_id: 'cli_resident_fixture_only', brand: 'feishu', runtime: runtimeIdentity()});
 const FIXTURE = fileURLToPath(new URL('./fixtures/resident-process.mjs', import.meta.url));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('reaction CLI reuses the resident journal across duplicate calls, restart and uncertain outcomes',async t=>{
+  const directory=temporary(t),identity=IDENTITY(),config=path.join(directory,'config.json');
+  fs.writeFileSync(config,JSON.stringify({app_id:identity.app_id,app_secret:'synthetic-secret'}));
+  let count=0;
+  const handler=async(operation,args)=>{assert.equal(operation,'react');assert.equal(args.messageId,'om_fixture');assert.equal(args.emojiType,'Get');count++;return args.idempotencyKey==='unknown-key'?{ok:false,status:'delivery_unknown',idempotency_key:args.idempotencyKey}:{ok:true,reaction_id:'reaction-fixture',idempotency_key:args.idempotencyKey};};
+  let service=await startResident({directory,identity,handler});onCleanup(t,()=>service.close());
+  const script=fileURLToPath(new URL('../scripts/server.mjs',import.meta.url));
+  const args=['--disable-warning=ExperimentalWarning',script,'react','--config',config,'--resident-dir',directory,'--message-id','om_fixture','--emoji-type','Get','--idempotency-key','receipt-key'];
+  const call=async()=>JSON.parse((await promisify(execFile)(process.execPath,args)).stdout);
+  const [first,second]=await Promise.all([call(),call()]);assert.deepEqual(first,second);assert.equal(count,1);
+  await service.close();service=await startResident({directory,identity,handler});assert.deepEqual(await call(),first);assert.equal(count,1);
+  const request={directory,identity,operation:'react',args:{messageId:'om_fixture',emojiType:'Get',idempotencyKey:'unknown-key'}};
+  const unknown=await residentRequest(request);assert.equal(unknown.status,'delivery_unknown');assert.deepEqual(await residentRequest(request),unknown);assert.equal(count,2);
+  await assert.rejects(residentRequest({...request,args:{...request.args,emojiType:'OK'}}),/idempotency-conflict/);assert.equal(count,2);
+});
 const cleanups = new WeakMap();
 function onCleanup(t, cleanup) {
   if (!cleanups.has(t)) {

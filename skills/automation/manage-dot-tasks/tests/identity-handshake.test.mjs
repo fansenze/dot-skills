@@ -96,7 +96,7 @@ test('the next ordinary authorized message follows agent intake with the scoped 
   const f = await fixture(t);
   for (const id of ['task-one', 'task-other']) await f.call('register', '--id', id, '--title', id, '--goal', 'Synthetic goal');
   const setup = await f.begin(), event = await f.incoming(setup); await f.ingest(event);
-  assert.deepEqual(f.state().outbox[0].document.rows.map(row => row[0]), ['task-one']);
+  assert.deepEqual(f.state().outbox[0].document.response.items.map(row => row.title), ['task-one']);
   const ordinary = await f.incoming(setup, {event_id:'event-two', message_id:'message-two', text:'Please continue the scoped task.', native_text:'Please continue the scoped task.'});
   await f.ingest(ordinary);
   const result = await f.call('start', '--consumer', 'active-agent', '--timeout-ms', '0');

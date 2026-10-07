@@ -9,7 +9,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {ROOT, fromMapping} from '../scripts/config.mjs';
 import {Inbox, readInboxPage} from '../scripts/messages.mjs';
 import {CAPABILITIES, formatContent} from '../scripts/formats.mjs';
-import {createNetwork, createClient, sendMessage} from '../scripts/transport.mjs';
+import {createNetwork, createClient, sendMessage, addReaction} from '../scripts/transport.mjs';
 const sample = i => ({app_id:'fixture-app',tenant_key:'fixture-tenant',event_id:'event-'+i,message_id:'message-'+i,text:'body-'+i,content:'private-'+i});
 function fixture(t) { const dir=fs.mkdtempSync(path.join(os.tmpdir(),'feishu-interface-')); t.after(()=>fs.rmSync(dir,{recursive:true,force:true})); return dir; }
 const cli = args => spawnSync(process.execPath,['--disable-warning=ExperimentalWarning',path.join(ROOT,'scripts/server.mjs'),...args],{encoding:'utf8',timeout:10000});
@@ -80,4 +80,36 @@ test('card and markdown use interactive create/reply payloads and unchanged idem
   await assert.rejects(sendMessage(client,{receiveId:'fixture-chat',format:'markdown',body:'| A | B |',idempotencyKey:'unsupported'}),/tables/);
   await assert.rejects(sendMessage(client,{receiveId:'fixture-chat',format:'unknown',body:'hi',idempotencyKey:'unsupported'}),/Unsupported/);
   assert.equal(calls.length,before);assert.throws(()=>formatContent('card',{schema:'2.0',elements:[]}),/Card/);
+});
+
+test('Get reaction uses the official SDK endpoint and returns a reaction receipt without creating a message',async t=>{
+  const network=createNetwork();t.after(()=>network.close());const calls=[];
+  network.httpInstance.defaults.adapter=async request=>{calls.push(request);return {data:request.url.includes('tenant_access_token')?{code:0,tenant_access_token:'fixture-token',expire:7200}:{code:0,data:{reaction_id:'reaction-fixture'}},status:200,statusText:'OK',headers:{},config:request};};
+  const client=createClient(fromMapping({app_id:'fixture-reactions',app_secret:'fixture-secret'}),network);
+  const result=await addReaction(client,{messageId:'om_fixture',emojiType:'Get',idempotencyKey:'reaction-key'});
+  assert.deepEqual(result,{ok:true,reaction_id:'reaction-fixture',idempotency_key:'reaction-key'});
+  const [call]=calls.filter(r=>!r.url.includes('tenant_access_token'));
+  assert.match(call.url,/\/im\/v1\/messages\/om_fixture\/reactions$/);assert.equal(call.method.toUpperCase(),'POST');
+  assert.deepEqual(JSON.parse(call.data),{reaction_type:{emoji_type:'Get'}});
+  const before=calls.length;
+  for(const invalid of [{messageId:'../unrelated',emojiType:'Get'},{messageId:'om_fixture',emojiType:'Get\n'},{messageId:'om_fixture',emojiType:'Get',idempotencyKey:'bad key'}]) await assert.rejects(addReaction(client,invalid));
+  assert.equal(calls.length,before);
+});
+
+test('reaction denial, malformed success, authentication failure and interrupted requests retain safe outcomes',async t=>{
+  const network=createNetwork();t.after(()=>network.close());let mode='denied',effects=0;
+  network.httpInstance.defaults.adapter=async request=>{
+    if(request.url.includes('tenant_access_token')) return {data:{code:0,tenant_access_token:'fixture-token',expire:7200},status:200,statusText:'OK',headers:{},config:request};
+    effects++;
+    if(mode==='timeout')throw Object.assign(new Error('PRIVATE request body'),{code:'ETIMEDOUT',config:request});
+    return {data:mode==='denied'?{code:99991672,msg:'PRIVATE diagnostic'}:{code:0,data:{message_id:'not-a-reaction'}},status:200,statusText:'OK',headers:{},config:request};
+  };
+  const client=createClient(fromMapping({app_id:'fixture-reaction-errors',app_secret:'fixture-secret'}),network),args={messageId:'om_fixture',emojiType:'Get',idempotencyKey:'reaction-key'};
+  const denied=await addReaction(client,args);assert.equal(denied.status,'api_error');assert.equal(denied.code,99991672);assert.equal(denied.request_phase,'reaction');
+  mode='malformed';assert.equal((await addReaction(client,args)).status,'delivery_unknown');
+  mode='timeout';const timed=await addReaction(client,args);assert.equal(timed.status,'delivery_unknown');assert.equal(timed.request_phase,'reaction');assert.equal(timed.error_code,'ETIMEDOUT');
+  assert.equal(effects,3);assert.doesNotMatch(JSON.stringify([denied,timed]),/PRIVATE/);
+  network.httpInstance.defaults.adapter=async request=>({data:{code:99991663},status:200,statusText:'OK',headers:{},config:request});
+  const cold=createClient(fromMapping({app_id:'fixture-reaction-cold',app_secret:'fixture-secret'}),network);
+  const auth=await addReaction(cold,args);assert.equal(auth.status,'not_sent');assert.equal(auth.request_phase,'authentication');
 });

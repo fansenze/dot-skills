@@ -1,7 +1,6 @@
 /** Synthetic adapter. Never contacts an external service. */
 import fs from 'node:fs';
 import path from 'node:path';
-import {renderResponse} from '../../scripts/reply-presentation.mjs';
 export function createConnector(settings) {
   const read = (name, fallback) => { try { return fs.readFileSync(path.join(settings.root, name), 'utf8'); } catch { return fallback; } };
   const append = (name, value) => {
@@ -19,9 +18,9 @@ export function createConnector(settings) {
     return {status: 'api_accepted', idempotency_key: message.idempotency_key, message_id: 'provider-message-id'};
   }
   return {
-    capabilities: () => ({protocol_version: settings.protocol ?? 1, name: settings.name ?? 'fixture',
+    capabilities: () => ({presentation:settings.presentation ?? 'feishu', ...(settings.react !== undefined ? {react:settings.react} : {}), protocol_version: settings.protocol ?? 1, name: settings.name ?? 'fixture',
       formats: settings.formats ?? ['text', 'markdown', 'card'], send: settings.send ?? true, reply: settings.reply ?? true, receive: settings.receive ?? true, durable_cursor: settings.durable_cursor ?? true}),
-    render: (format, document) => document.response ? renderResponse(document.response, format) : format === 'card' ? document : document.rows.map(r => r.join(' · ')).join('\n') || document.title,
+    react: settings.react ? async message => { const r=await send(message); if(r.status!=='api_accepted')return r; const {message_id,...rest}=r; return {...rest,reaction_id:'reaction-fixture'}; } : undefined,
     send: settings.send === false ? undefined : send, reply: settings.reply === false ? undefined : send,
     async receive({cursor, limit}) {
       const rows = JSON.parse(read('inbox.json', '[]')), start = cursor === null ? 0 : Number(cursor);

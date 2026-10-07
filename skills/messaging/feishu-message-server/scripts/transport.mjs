@@ -44,6 +44,7 @@ function requestPhase(request) {
   if (request.method?.toUpperCase() === 'POST') {
     if (pathname === '/open-apis/im/v1/messages') return 'send';
     if (/^\/open-apis\/im\/v1\/messages\/[^/]+\/reply$/.test(pathname)) return 'reply';
+    if (/^\/open-apis\/im\/v1\/messages\/[^/]+\/reactions$/.test(pathname)) return 'reaction';
   }
   if (pathname === '/open-apis/bot/v3/info') return 'bot_identity';
   if (pathname === '/callback/ws/endpoint') return 'websocket_discovery';
@@ -237,6 +238,23 @@ export async function sendMessage(client, {format = 'text', body, idempotencyKey
   const data = {...formatContent(format, body), uuid: key};
   if (Buffer.byteLength(data.content, 'utf8') > 28000) throw new SafeError('Card JSON must not exceed 28000 UTF-8 bytes');
   return sendData(client, data, target);
+}
+
+/** A reaction is an explicit transport operation, never an automatic receive hook. */
+export async function addReaction(client, {messageId, emojiType, idempotencyKey = randomUUID()}) {
+  const base = {idempotency_key:outgoingContent('validate key',idempotencyKey).uuid};
+  if (typeof messageId !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(messageId)) throw new SafeError('A valid message-id is required');
+  if (typeof emojiType !== 'string' || !/^[A-Za-z0-9_]{1,64}$/.test(emojiType)) throw new SafeError('A valid case-sensitive emoji-type is required');
+  try {
+    const response = await client.im.messageReaction.create({path:{message_id:messageId},data:{reaction_type:{emoji_type:emojiType}}});
+    if (response?.code === 0 && typeof response?.data?.reaction_id === 'string' && response.data.reaction_id) return {ok:true,...base,reaction_id:response.data.reaction_id};
+    const apiError = Number.isSafeInteger(response?.code) && response.code !== 0;
+    return {ok:false,...base,status:apiError ? 'api_error' : 'delivery_unknown',request_phase:'reaction',...getHttpDiagnostics(response),
+      ...responseCodes({data:response}),error_type:apiError ? 'api_error' : 'invalid_response'};
+  } catch (error) {
+    const details = {request_phase:'unknown',...transportFailure(error),...getHttpDiagnostics(error)};
+    return {ok:false,...base,status:details.request_phase === 'authentication' ? 'not_sent' : details.http_status >= 400 && details.http_status < 500 ? 'api_error' : 'delivery_unknown',...details};
+  }
 }
 
 async function sendData(client, data, {receiveId, receiveIdType = 'chat_id', messageId, replyInThread = false}) {
