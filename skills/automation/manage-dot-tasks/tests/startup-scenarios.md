@@ -59,3 +59,16 @@ Historical failure annotations never send/replay. Newly unrecoverable creation f
 ## Intake without a setup message
 
 Run `node --test tests/received-intake.test.mjs` with its temporary store and local fixture. Review startup with no recorded target: SDK lifecycle establishes connection readiness and each actual request records its source while immediately entering ordinary processing. Anyone may send a request; no whitelist, challenge or per-sender grant is created. Restart must preserve the one policy, cutoff, message provenance, decisions and source bindings. Different senders/chats must remain separately attributable with replies routed to their actual origins. Selecting open intake supersedes sender-specific admission rules for new messages and cancels pending challenges. Successful startup produces a brief readiness confirmation in dot.
+
+## Periodic startup contract review
+
+Review the new-instance workflow using synthetic state only. Platform scheduling must be exercised by dot's actual automation tools, not represented by a Node test result.
+
+- Full startup intent: preserve host/config/task/reply scope and explicit periodic-check/recovery authorization. Verify the enabled ten-minute automation and wait for its scheduled invocation before full success; manual `run_now` alone is insufficient.
+- Initial ordering: finish one bounded initial consumer call, establish/reuse the owning service context, create and verify the automation, then continuously re-arm; fresh installation requires no historical service record.
+- Live session: timed check reuses one receiver and then collects/re-arms the bounded consumer. Health without consumption is incomplete.
+- Lost session: one locked replacement attempt; held flock, network denial, unavailable context or unknown effects block unsafe takeover/replay. Successful replacement resumes consumption with existing IDs and scopes.
+- Stop: record cancellation in the existing owning context first, disable/verify this instance's automation and grant/connection, then EOF the owned session; an already queued invocation reads latest stop and does nothing. A stopped or revoked scope must never be revived by setup or inspection.
+- No recurring authority or explicit opt-out: do not create an automation. Report foreground-only readiness and its limits without inventing missing permission.
+
+Run `node --test tests/managed-session.test.mjs tests/startup.test.mjs` for existing synthetic ownership, receiver reuse, safe replacement, EOF cleanup, intake and receipt preservation. These tests do not prove platform scheduling or live Feishu behavior.

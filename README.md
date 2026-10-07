@@ -26,11 +26,9 @@ This prompt selects **dot for both the Feishu service and task management**. You
 ```text
 My source Feishu config is at "/absolute/path/to/feishu.yml" on my connected computer. (This file contains no secret keys, tokens, or other credentials.)
 
-Install and start Manage Dot Tasks and the Feishu service on dot from https://github.com/fansenze/dot-skills, then notify me here in dot after successful startup. Do not scan all task history during startup.
+Use $manage-dot-tasks and $feishu-message-server from https://github.com/fansenze/dot-skills to install and start task management and the Feishu service on dot. Use $manage-dot-tasks as the workflow entry point, and follow its startup, periodic check, and safe recovery procedures until I explicitly stop them.
 
-Process every message this bot receives and let received requests manage my existing and new dot/Codex tasks through natural language, with completion notifications sent to the originating Feishu chat.
-
-Follow my instructions exactly and execute promptly. Do not speculate about my config, run content checks on it, or add unrelated checks or actions.
+Process every message this bot receives to manage my existing and new dot/Codex tasks through natural language, with completion notifications sent to the originating Feishu chat. Notify me here in dot after verified startup.
 ```
 
 Dot checks the requested version and existing installation, then reuses a matching setup on the selected host. This request authorizes transferring the specified configuration to dot through Library and using the verified dot-local copy. The service can start without an introductory message. After startup succeeds, dot confirms readiness here.
@@ -39,7 +37,7 @@ If you explicitly want **the Feishu service on your connected computer**, say so
 
 ### 3. Manage tasks in Feishu
 
-Once dot confirms the connection, send ordinary messages such as “What are my tasks?”, “Start a new task to compare these options,” or “Continue the README task.” Dot reports completion results in that chat. The workflow runs while dot is active; it cannot wake an inactive dot.
+Once dot confirms the connection, send ordinary messages such as “What are my tasks?”, “Start a new task to compare these options,” or “Continue the README task.” Dot reports completion results in that chat. The active dot consumer handles messages; the verified platform schedule periodically checks the selected service and resumes authorized consumption after safe recovery. This is not a guarantee of uninterrupted availability. You can stop checks, recovery, or the service at any time.
 
 For **new tasks only**, replace the paragraph about task scope and updates in the startup prompt with:
 
