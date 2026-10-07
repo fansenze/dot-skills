@@ -11,6 +11,7 @@ export function createConnector(settings) {
   };
   async function reply(message) {
     const mode=read('mode','accepted').trim(); append('calls.jsonl',message);
+    if(typeof message.idempotency_key!=='string'||!/^[A-Za-z0-9_-]{1,50}$/.test(message.idempotency_key))return {status:'not_sent',idempotency_key:message.idempotency_key,retryable:false,error_code:'idempotency-key-required'};
     if(mode==='not_sent')return {status:'not_sent',idempotency_key:message.idempotency_key,retryable:true,error_code:'synthetic-no-send'};
     if(mode==='api_error')return {status:'api_error',idempotency_key:message.idempotency_key,http_status:400};
     append('effects.jsonl',message);
@@ -18,6 +19,7 @@ export function createConnector(settings) {
     if(mode==='crash-after-effect'||(mode==='crash-on-second-effect'&&effects===2))process.kill(process.pid,'SIGKILL');
     if(mode==='throw-after-effect')throw new Error('PRIVATE-SYNTHETIC-DIAGNOSTIC-MUST-NOT-LEAK');
     if(mode==='malformed')return {status:'api_accepted',idempotency_key:'wrong-key',message_id:'untrusted-id'};
+    if(mode==='override-receipt-key')return {status:'api_accepted',idempotency_key:read('receipt-key',''),message_id:'untrusted-id'};
     const message_id='synthetic-provider-'+crypto.createHash('sha256').update(message.idempotency_key).digest('hex').slice(0,24);
     return {status:'api_accepted',idempotency_key:message.idempotency_key,message_id,parent_id:message.reply_to,root_id:message.reply_to,thread_id:'synthetic-thread'};
   }

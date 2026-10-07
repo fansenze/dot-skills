@@ -20,6 +20,8 @@ const fail = message => { throw new ConnectorError(message); };
 const stamp = () => new Date().toISOString();
 const encode = v => JSON.stringify(v,null,2)+'\n';
 const identifier = v => requireText(v,'conversation identifier',256);
+// Keep ledger IDs stable; Feishu and bridge transport keys allow at most 50 characters.
+const transportKey = id => id.length<=50?id:'chat-v1-'+crypto.createHash('sha256').update(id).digest('hex').slice(0,40);
 const object = (v, keys) => { if (!v || typeof v!=='object' || Array.isArray(v) || Object.keys(v).some(k=>!keys.includes(k))) fail('Invalid conversation input fields'); return v; };
 const text = v => {
   if (typeof v!=='string' || !v.trim() || v.length>4000 || !v.isWellFormed() || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/u.test(v)) fail('Invalid sanitized conversation text');
@@ -236,9 +238,11 @@ export function createConversations({store}) {
         body=renderConnectorDocument(snapshot.c.capabilities,format,responseDocument(n.message.response??{template:'detail',title:({question:'Question',question_update:'Updated question',blocked:'Action needed',completed:'Task result',user_message:'User message'})[n.message.kind]??'Task conversation',lead:n.message.text}));
         if(body===undefined||Buffer.byteLength(JSON.stringify(body))>28000)fail('Rendered message exceeds bounds');
       } catch {results.push(await receipt(n.id,n.lease.token,{status:'not_sent',idempotency_key:n.id,retryable:false,error_code:'adapter-preflight-failed'}));continue;}
-      await begin(n.id,n.lease.token);let result;
-      try {result=await bounded(signal=>adapter.reply({account_id:snapshot.g.account,destination:{type:'chat_id',id:snapshot.g.destination},format,body,reply_to:n.root_id,reply_in_thread:true,idempotency_key:n.id},{signal}));}catch{result=null;}
-      results.push(await receipt(n.id,n.lease.token,result));
+      await begin(n.id,n.lease.token);const key=transportKey(n.id);let result;
+      try {result=await bounded(signal=>adapter.reply({account_id:snapshot.g.account,destination:{type:'chat_id',id:snapshot.g.destination},format,body,reply_to:n.root_id,reply_in_thread:true,idempotency_key:key},{signal}));}catch{result=null;}
+      // Validate the actual transport receipt before associating it with the canonical delivery.
+      const checked=sendResult(result,key);
+      results.push(await receipt(n.id,n.lease.token,{...checked,idempotency_key:n.id}));
     }
     return {deliveries:results};
   }

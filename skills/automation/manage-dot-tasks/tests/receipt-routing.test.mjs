@@ -26,15 +26,24 @@ async function fixture(t, channel = 'feishu') {
 
 test('Feishu acknowledges the first topic message with text and subsequent messages with Get, including batched/restarted intake',async t=>{
   const f=await fixture(t),first=f.event('om_first');
-  await f.ingest(first,f.event('om_second',{root_id:'om_first',thread_id:'omt_topic'}),f.event('om_third',{thread_id:'omt_topic'}));
+  await f.ingest(first);await f.deliver();
+  const firstReceipt=f.state().outbox[0].receipt;
+  assert.equal(firstReceipt.status,'api_accepted');assert.ok(firstReceipt.message_id);assert.notEqual(firstReceipt.message_id,first.message_id);
+  assert.equal(firstReceipt.reaction_id,undefined);
+  const second=f.event('om_second',{root_id:'om_first',parent_id:firstReceipt.message_id,thread_id:'omt_topic'}),third=f.event('om_third',{thread_id:'omt_topic'});
+  await f.ingest(second,third);
   assert.deepEqual(f.state().outbox.map(n=>n.operation??'message'),['message','react','react']);
   const sent=await f.deliver();assert.ok(sent.notifications.every(n=>n.state==='api_accepted'));
   const calls=fs.readFileSync(path.join(f.transport,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
-  assert.equal(calls[0].format,'text');assert.equal(calls[0].body,'收到，正在处理。');
+  assert.equal(calls[0].format,'text');assert.equal(calls[0].body,'收到，正在处理。');assert.equal(calls[0].emoji_type,undefined);
   assert.deepEqual(calls.slice(1).map(m=>[m.message_id,m.emoji_type]),[['om_second','Get'],['om_third','Get']]);
   assert.ok(calls.slice(1).every(m=>m.body===undefined&&m.destination===undefined));
-  await f.ingest(first,f.event('om_fourth',{parent_id:'om_third'}));await f.deliver();await f.deliver();
-  assert.equal(f.state().outbox.length,4);assert.equal(fs.readFileSync(path.join(f.transport,'calls.jsonl'),'utf8').trim().split('\n').length,4);
+  const fourth=f.event('om_fourth',{parent_id:firstReceipt.message_id});
+  await f.ingest(first,fourth);await f.deliver();await f.ingest(second,third,fourth);await f.deliver();
+  const allCalls=fs.readFileSync(path.join(f.transport,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(f.state().outbox.length,4);assert.equal(allCalls.length,4);
+  assert.deepEqual(allCalls.slice(1).map(m=>[m.message_id,m.emoji_type]),[['om_second','Get'],['om_third','Get'],['om_fourth','Get']]);
+  assert.ok(allCalls.slice(1).every(m=>m.message_id!==first.message_id&&m.message_id!==firstReceipt.message_id&&m.body===undefined));
   const claim=(await f.call('message-next','--consumer','test-agent')).messages[0];
   assert.ok(claim.context.reply_references.every(r=>r.message_id!=='reaction-fixture'));
 });
@@ -69,6 +78,20 @@ test('uncertain reactions preserve their frozen payload and never fall back to a
   await f.call('resolve-notice',n.id,'--status','api_accepted','--reaction-id','reaction-verified','--evidence','Synthetic reaction receipt');
   assert.equal(f.state().outbox[1].receipt.reaction_id,'reaction-verified');
   assert.equal(sendResult({status:'api_accepted',idempotency_key:'key',message_id:'wrong'},'key','react').status,'delivery_unknown');
+});
+
+test('reaction permission errors never send replacement text or retry duplicate input',async t=>{
+  const f=await fixture(t);await f.ingest(f.event('om_first'));await f.deliver();
+  fs.writeFileSync(path.join(f.transport,'mode'),'reaction-permission-error');
+  const second=f.event('om_second',{root_id:'om_first'});await f.ingest(second);
+  const [result]=(await f.deliver()).notifications;assert.equal(result.state,'api_error');
+  const notice=f.state().outbox[1];assert.equal(notice.receipt.code,99991672);assert.equal(notice.receipt.reaction_id,undefined);
+  assert.deepEqual(notice.wire_body,{message_id:'om_second',emoji_type:'Get'});
+  fs.writeFileSync(path.join(f.transport,'mode'),'accepted');await f.ingest(second);
+  assert.deepEqual((await f.deliver()).notifications,[]);assert.equal(f.state().outbox.length,2);
+  const calls=fs.readFileSync(path.join(f.transport,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(calls.length,2);assert.equal(calls[1].message_id,'om_second');assert.equal(calls[1].emoji_type,'Get');assert.equal(calls[1].body,undefined);
+  assert.equal(fs.readFileSync(path.join(f.transport,'effects.jsonl'),'utf8').trim().split('\n').length,1);
 });
 
 test('disabled authority and forged reaction targets cannot dispatch',async t=>{

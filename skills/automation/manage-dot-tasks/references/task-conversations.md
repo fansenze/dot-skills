@@ -261,6 +261,15 @@ contract](connectors.md#adapter-interface-and-schemas): `idempotency_key` and
 of delivery to the human or of a read. Keep original anchors and provider
 receipts so a later reply can be traced to the exact task and question revision.
 
+Canonical delivery IDs remain unchanged in the ledger and its receipts. At the
+Feishu connector boundary, IDs longer than 50 characters use the transport key
+`chat-v1-` followed by the first 40 hexadecimal characters of the original ID's
+SHA-256 hash (48 characters total). IDs of at most 50 characters pass through
+unchanged. Validate the returned transport key before associating the result
+with the canonical delivery ID; a wrong or missing key is `delivery_unknown`,
+even if the result claims acceptance. Reconciliation reuses the same mapping
+and never grants an automatic retry of an uncertain send.
+
 `not_sent` means authoritative evidence that the attempt did not send;
 `api_error` means a definite API rejection. Missing, malformed, mismatched,
 timed-out, or otherwise uncertain results are `delivery_unknown`. Never record

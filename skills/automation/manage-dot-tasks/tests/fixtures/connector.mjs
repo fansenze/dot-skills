@@ -11,6 +11,7 @@ export function createConnector(settings) {
     const mode = read('mode', 'accepted').trim(); append('calls.jsonl', message);
     if (mode === 'not_sent') return {status: 'not_sent', idempotency_key: message.idempotency_key, retryable: true, error_code: 'ETIMEDOUT'};
     if (mode === 'api_error') return {status: 'api_error', idempotency_key: message.idempotency_key, code: 400};
+    if (mode === 'reaction-permission-error' && message.emoji_type) return {status: 'api_error', idempotency_key: message.idempotency_key, code: 99991672, retryable: false};
     append('effects.jsonl', message);
     if (mode === 'crash-after-effect') process.kill(process.pid, 'SIGKILL');
     if (mode === 'throw-after-effect') throw new Error('PRIVATE-DIAGNOSTIC-MUST-NOT-LEAK');

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
@@ -98,6 +99,58 @@ test('dual publish persists once; dot intent/receipt and mocked Feishu retain or
   const effect=f.effects()[0];assert.equal(effect.reply_to,'feishu-original-root');assert.equal(effect.reply_in_thread,true);assert.deepEqual(effect.destination,{type:'chat_id',id:'feishu-chat-one'});assert.equal(effect.account_id,'account-one');assert.match(effect.body,/已核对任务范围/);
   const state=f.show();assert.ok(state.deliveries.every(n=>n.state==='api_accepted'));assert.equal(state.deliveries.find(n=>n.channel==='feishu').receipt.root_id,'feishu-original-root');
   assert.deepEqual(f.deliver().deliveries,[]);assert.equal(f.effects().length,1);assert.equal(f.call('doctor').ok,true);
+});
+
+test('Feishu transport keys preserve canonical card deliveries and dot receipt identities',t=>{
+  const f=fixture(t);for(const id of ['card-one','card-two'])f.publish(f.message({id,format:'card'}));
+  const before=f.ledger().deliveries,canonical=before.filter(n=>n.channel==='feishu');
+  assert.ok(canonical.every(n=>n.id.length===54));
+  const delivered=f.deliver().deliveries;assert.deepEqual(delivered.map(n=>n.id),canonical.map(n=>n.id));
+  assert.ok(delivered.every(n=>n.state==='api_accepted'&&n.receipt.idempotency_key===n.id&&n.receipt.message_id));
+  const calls=f.calls();assert.equal(calls.length,2);
+  for(const [index,call] of calls.entries()) {
+    const expected='chat-v1-'+crypto.createHash('sha256').update(canonical[index].id).digest('hex').slice(0,40);
+    assert.equal(call.idempotency_key,expected);assert.equal(call.idempotency_key.length,48);
+    assert.equal(call.format,'card');assert.equal(typeof call.body,'object');
+    assert.equal(call.reply_to,'feishu-original-root');assert.equal(call.reply_in_thread,true);
+  }
+  assert.notEqual(calls[0].idempotency_key,calls[1].idempotency_key);
+  assert.deepEqual(f.ledger().deliveries.map(n=>n.id),before.map(n=>n.id));
+  const dot=f.next();assert.equal(dot.id,before.find(n=>n.channel==='dot').id);f.begin(dot);
+  assert.equal(f.receipt(dot).receipt.idempotency_key,dot.id);
+  assert.deepEqual(f.deliver().deliveries,[]);assert.equal(f.effects().length,2);
+});
+
+test('Feishu transport keys leave existing short and 50-character IDs unchanged and map 51-character IDs distinctly',t=>{
+  const f=fixture(t,{channels:['feishu']}),ids=['short-delivery','x'.repeat(50),'x'.repeat(50)+'a','x'.repeat(50)+'b'];
+  ids.forEach((id,index)=>f.publish(f.message({id:'boundary-'+index})));
+  f.edit('conversations.json',d=>d.deliveries.forEach((n,index)=>{n.id=ids[index];}));
+  const delivered=f.deliver().deliveries;
+  assert.deepEqual(delivered.map(n=>n.id),ids);assert.ok(delivered.every(n=>n.state==='api_accepted'&&n.receipt.idempotency_key===n.id));
+  const keys=f.calls().map(c=>c.idempotency_key);assert.deepEqual(keys.slice(0,2),ids.slice(0,2));
+  assert.ok(keys.slice(2).every(k=>/^chat-v1-[a-f0-9]{40}$/.test(k)));assert.notEqual(keys[2],keys[3]);
+});
+
+test('Feishu transport keys reject receipts that echo the canonical ID or another key without resending',t=>{
+  for(const wrong of ['canonical','unrelated']) {
+    const f=fixture(t,{channels:['feishu']});f.publish();f.publish(f.message({id:'message-two'}));
+    const canonical=f.ledger().deliveries[0].id;
+    fs.writeFileSync(path.join(f.external,'receipt-key'),wrong==='canonical'?canonical:'another-transport-key');f.mode('override-receipt-key');
+    const [result]=f.deliver().deliveries;
+    assert.equal(result.state,'delivery_unknown');assert.equal(result.receipt.idempotency_key,canonical);
+    assert.equal(result.receipt.error_code,'invalid-adapter-result');assert.equal(result.receipt.message_id,undefined);assert.equal(result.receipt.retryable,false);
+    assert.notEqual(f.calls()[0].idempotency_key,canonical);f.mode('accepted');
+    assert.deepEqual(f.deliver().deliveries,[]);assert.equal(f.calls().length,1);assert.equal(f.effects().length,1);
+  }
+});
+
+test('Feishu transport keys stay stable after explicit no-send reconciliation',t=>{
+  const f=fixture(t,{channels:['feishu']});f.publish();const canonical=f.ledger().deliveries[0].id;f.mode('not_sent');
+  const [stopped]=f.deliver().deliveries;assert.equal(stopped.state,'not_sent');assert.equal(stopped.receipt.idempotency_key,canonical);
+  assert.deepEqual(f.deliver().deliveries,[]);assert.equal(f.calls().length,1);assert.equal(f.effects().length,0);
+  f.resolve(stopped,{status:'not_sent',message_id:undefined});f.mode('accepted');
+  const [sent]=f.deliver().deliveries;assert.equal(sent.state,'api_accepted');assert.equal(sent.id,canonical);assert.equal(sent.receipt.idempotency_key,canonical);
+  assert.deepEqual(f.calls()[1],f.calls()[0]);assert.equal(f.effects().length,1);
 });
 
 test('explicit binding requires a scoped agent grant and is immutable and channel narrow',t=>{

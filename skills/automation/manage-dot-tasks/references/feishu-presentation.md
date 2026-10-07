@@ -26,8 +26,8 @@ Official contracts: [plain text and sizes](https://open.feishu.cn/document/feish
 
 For an authorized Feishu agent-mode intake:
 
-- The first admitted message in a topic keeps the existing short receipt, `收到，正在处理。` (or the configured English equivalent).
-- Each subsequent admitted message in that topic queues one `react` operation targeting that incoming message with `emoji_type: "Get"`. The value is case-sensitive. It creates no extra receipt message.
+- The first admitted message in a topic creates a new short text receipt, `收到，正在处理。` (or the configured English equivalent), with a message ID on API acceptance.
+- Each subsequent admitted message in that topic queues one `react` operation targeting that incoming message with `emoji_type: "Get"`. The second, third and later reactions each use the current incoming message ID, never the topic root or a bot reply. The value is case-sensitive. It creates no extra receipt message.
 - Topic identity uses actual `message_id`, `parent_id`, `root_id` and `thread_id`, plus accepted bot reply references and already verified canonical conversation roots. It is scoped to the immutable connector binding, grant, account, tenant and chat. Different admitted senders in the same group topic share the receipt policy; this does not share their task authority or private context.
 - A new unthreaded message without provider references starts a new topic. Do not guess a topic from text, task title, elapsed time or the newest task. The first message observed in an existing thread still gets the initial receipt when no earlier admitted message is known.
 - Choose and persist the receipt during intake under the existing store lock, before advancing the checkpoint. A duplicate event, another batch, process restart or later delivery cannot change that decision or enqueue another receipt.
