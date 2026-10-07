@@ -116,6 +116,10 @@ Consider restarting the listener only with evidence of listener disconnection, a
 
 Missing configuration, unavailable Feishu permissions, or execution-environment restrictions can prevent an operation. Report the actual result, cause, and next step. Continue steps already covered by the user's authorization. The server runs in the foreground; Ctrl-C stops it.
 
+## Development checks and packaging
+
+Use `validate` and `test` for code maintenance, release/export validation, or an explicit regression request. Ordinary installation, startup, or resume uses the pinned runtime, required dependencies, selected configuration's `check`/`identity`, `capabilities`, and current lifecycle/health evidence from the workflow above. It does not require the test suite or repository-wide checks. Create an archive only when packaging or code transfer is part of the task.
+
 ```bash
 bash feishu.sh validate
 bash feishu.sh test

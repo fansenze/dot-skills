@@ -109,14 +109,7 @@ Keep details concise without empty sections, a full timeline, legends, or duplic
 - Use `--expected-revision` when multiple writers may update a task. Re-read and reconcile on conflict.
 - After an uncertain write, read the latest record before retrying. Do not blindly repeat external actions.
 
-Before delivery, run isolated tests and check the intended store:
-
-```bash
-node --test "$SKILL_DIR/tests/"*.test.mjs
-node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" doctor
-```
-
-The assistant memory scenarios in [tests/first-use-scenarios.md](tests/first-use-scenarios.md) and scheduling scenarios in [tests/scheduling-scenarios.md](tests/scheduling-scenarios.md) are simulations. Local tests do not establish real platform task execution, complete discovery, notification delivery, or memory persistence.
+Verify each delivery against the requested outcome and that task's acceptance criteria. For installation, startup, or resume, follow the [startup verification scope](references/startup.md#verification-scope); do not rerun this skill's test suite as a delivery prerequisite. Use `doctor` / `verify` when diagnosing local store integrity or performing a requested store audit; they inspect the whole selected store and do not verify external outcomes. For skill code changes, export validation, or an explicit regression request, use the [maintenance checks](references/cli.md#portability-and-verification).
 
 ## Failed requests and deployment
 

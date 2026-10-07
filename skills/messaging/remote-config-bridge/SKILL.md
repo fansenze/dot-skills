@@ -35,9 +35,11 @@ The adapter waits at most 65 seconds for a receipt; manage-dot-tasks delivery ha
 
 ## Verification and reporting
 
-Run `node scripts/validate.mjs` and `node --test tests/*.test.mjs` from the skill directory. Tests use synthetic configuration paths and fixtures, never real credentials or live messages. Optional `node scripts/package.mjs --output ABSOLUTE_PATH` creates a portable code archive without runtime state.
+For installation, startup, or resume, verify the pinned runtimes, selected worker/cloud bindings, Feishu configuration/identity/capabilities and actual readiness through the [orchestration workflow](references/orchestration.md). Full test suites, replay experiments and repository-wide checks are not operational prerequisites.
 
 Report separately: local worker readiness, receive transport connection, verified message receipt, send API acceptance and human reading. API success does not prove reading. Skill installation and synthetic tests do not establish live remote transport. For a live acceptance run, require authorized destination/content and use actual platform task results; stop at a permissions blocker without fallback sends.
+
+For code maintenance, release/export validation, or an explicit regression request, use `node scripts/validate.mjs` and the relevant tests from the skill directory; `node --test tests/*.test.mjs` runs the complete bridge suite. Tests use synthetic configuration paths and fixtures, never real credentials or live messages. When an export is requested, `node scripts/package.mjs --output ABSOLUTE_PATH` creates a portable code archive without runtime state.
 
 The repository import preserves the corrected core and its fourteen upstream tests, including generation-safe lock recovery. [Upstream provenance](references/upstream.json) records the accepted code hash. Prior dot-to-Mac-to-dot synthetic acceptance and one-effect upgrade replay are established evidence; they do not prove live Feishu delivery. Repository routing scenarios are local simulations.
 

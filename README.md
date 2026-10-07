@@ -76,6 +76,8 @@ Repository guidance is in [AGENTS.md](AGENTS.md). Runtime protocols and recovery
 
 ## Validate and package
 
+This section is for maintainers validating code changes or release exports. Ordinary installation, startup, and resume follow the selected skill's operational checks; they do not require `pnpm check`, full test suites, or an export/extraction round trip.
+
 First [verify the runtime tools](skills/messaging/feishu-message-server/references/remote-configuration.md#verify-runtime-tools): put the selected pnpm 11.27.0 bin directory first on `PATH` and verify child-process lookup, not only a direct `pnpm.cjs` invocation. Preserve that environment across tool calls. Then, from the repository root:
 
 ```bash

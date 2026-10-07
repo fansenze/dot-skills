@@ -1,6 +1,6 @@
 # Integrated startup acceptance scenarios
 
-These scenarios test the canonical [startup workflow](../references/startup.md). Use isolated temporary stores, fabricated identities and the fixture connector; no credentials, real messages, live listener, permanent memory activation or background monitor. Agent decisions in automated tests are scripted inputs, not an NLP evaluator.
+These scenarios test the canonical [startup workflow](../references/startup.md) during repository maintenance or an explicit regression review, not ordinary installation or startup. Use isolated temporary stores, fabricated identities and the fixture connector; no credentials, real messages, live listener, permanent memory activation or background monitor. Agent decisions in automated tests are scripted inputs, not an NLP evaluator.
 
 ## Prompt comparison
 
@@ -9,6 +9,18 @@ These scenarios test the canonical [startup workflow](../references/startup.md).
 - **Selected primary:** the [startup prompt](../references/startup.md#interpret-intent-then-fill-only-real-gaps) explicitly selects dot for the Feishu service and task management while naming a separate configuration source. It supplies intake from any sender, existing/new dot/Codex task scope, completion notifications and a brief startup confirmation in dot. The skill transfers a selected computer-local configuration through Library and verifies its received bytes; sender and chat metadata come from actual requests.
 - **New-only alternative:** state only tasks created through the chat and their progress/results. No pre-existing task disclosure or initial all-task watch.
 - **Resume:** retain the selected service host, verified runtime/configuration, chat and scope. Read revoked/disabled state first; a generic setup request is not authorization to undo a revocation.
+
+## Verification scope review
+
+Review the assistant's selected actions against these synthetic requests; judge scope and evidence, not exact wording.
+
+| Request and evidence | Expected behavior |
+| --- | --- |
+| Install and initialize locally, without Feishu; verified unchanged skill | Verify the runtime and selected store initialization plus authorized first-use memory. Do not start transport, create a schedule, run regression suites, or audit the entire store by default. |
+| Install and start with Feishu; configuration and requested scope available | Verify runtime/dependencies, configuration, bindings, live receiver and bounded consumer results. Run scheduled-invocation acceptance only if periodic checks were requested. Do not run `pnpm check`, full skill suites, export round trips or synthetic recovery experiments. |
+| Resume the same verified runtime, store and healthy receiver | Inspect current enabled scope and refresh live readiness; reuse the setup without reinstalling, duplicating services, or rerunning regression suites. |
+| Configuration check fails or startup reports a connection error | Diagnose that concrete failure with the relevant checks and report its blocker. Do not automatically expand to a repository-wide regression run or substitute passing mocks for live readiness. |
+| Startup code changes, release/export validation, or an explicit regression request | Select the relevant synthetic tests and follow repository maintenance requirements for the actual change. A full suite is appropriate when that maintenance scope requires it; passing tests still do not establish live service readiness. |
 
 ## Executable local experiments
 

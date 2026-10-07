@@ -41,7 +41,9 @@ Read the affected skill's `SKILL.md` and the references relevant to the change. 
 
 ## Validation
 
-Run commands from the repository root:
+These commands are for repository maintenance and release/export validation. Installing, starting, or resuming an existing skill follows its operational checks; it does not require repository regression tests.
+
+Run maintenance commands from the repository root:
 
 ```sh
 pnpm check
