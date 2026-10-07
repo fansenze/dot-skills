@@ -149,7 +149,7 @@ node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" resolve-notice "$NOTI
 node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" retry-notice "$NOTICE_ID" --reason "$AUTHORIZED_RETRY_REASON"
 ```
 
-Reconciliation/retry commands record evidence/reason supplied by the authorized agent; they do not independently query the provider or establish that evidence. Never invent a message ID or resolve from missing/partial query results. Uncertain delivery remains visible in the existing three-column task UI. Delivery receipts do not create task change events, preventing notification feedback loops.
+Reconciliation/retry commands record evidence/reason supplied by the authorized agent; they do not independently query the provider or establish that evidence. Never invent a message ID or resolve from missing/partial query results. Uncertain delivery remains visible in task detail/history views and the delivery queue, independently of the default active list. Delivery receipts do not create task change events, preventing notification feedback loops.
 
 ## Inbound authorization and modes
 
@@ -251,3 +251,7 @@ Historical body-free rejections remain deduplicated. A verified agent can explic
 ### Reviewed context continuity across an upgrade
 
 An agent grant may explicitly declare `--context-from OLD_GRANT_ID[,OLDER_GRANT_ID]` (at most 20), only when the user still authorizes that old task context. The referenced agent grants must match account, tenant, sender and destination exactly. The new grant must independently cover each task. This provides direct-reference evidence from old task-bound messages and accepted bot/watch receipts; it does not inherit old task permissions, taskless exchanges or recent conversational history. Disabled policies remain disabled and revoked task scope is not restored. No receipt or rejected input is replayed, and no dedup/cursor/cutoff changes. Omission retains strict separation. See [safe migration](migration-threaded-intake.md).
+
+### Default list snapshot
+
+Agent claims additionally expose `context.task_list` with `scope: "recent_active"`, `limit: 10`, `order: "updated_at desc"`, `total: null`, `observed_at`, and scoped task summaries (including update time and blockers). It filters active states before selecting records. This read-only snapshot supports ordinary task-list replies; it grants no additional scope or execution authority. The fifty-record association context and direct reply references remain separate, so terminal tasks can still be resolved when explicitly requested. Initial list notifications and legacy `/tasks list` use the same bounded active default.

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import {selectTaskList} from './task-list.mjs';
 import {createConversations, readConversations, CONVERSATION_OPTIONS, CONVERSATION_IDS} from './task-conversations.mjs';
-import {uiTime, userStatus} from './presentation.mjs';
+import {uiTime, taskStatusLabel} from './presentation.mjs';
 /** Dependency-free task management and scheduling. Node.js 22.18+; Linux/macOS. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -190,14 +191,15 @@ export class Store {
   get(id){const t=read_json(this.path(`tasks/${task_id(id)}/task.json`));validate_task(t);if(t.id!==id)throw new TaskError('task directory and record ID differ');return t;}
   save(t,isNew=false,extraWrites={}){validate_task(t);let index=this.index();const present=index.some(r=>r.id===t.id);if(isNew&&(present||fs.existsSync(this.path(`tasks/${t.id}/task.json`))))throw new TaskError('task ID already exists');if(!isNew&&!present)throw new TaskError('task is missing from index; run doctor');index=index.filter(r=>r.id!==t.id).concat([index_row(t)]).sort((a,b)=>lex(a.id,b.id));const prefix=`tasks/${t.id}/`,writes={[prefix+'task.json']:encoded(t)};for(const[k,v]of Object.entries(projections(t)))writes[prefix+k]=v;writes['tasks.json']=encoded(index);this.commit({...writes,...taskNotificationWrites(this,t,isNew?null:this.get(t.id)),...extraWrites});}
   all(){return this.index().map(r=>{const t=this.get(r.id);if(['id','title','status','updated_at'].some(k=>r[k]!==t[k]))throw new TaskError('index/detail mismatch; run doctor');return t;});}
+  selected(options={},scope=()=>true){return selectTaskList(this.index().filter(scope),options).map(r=>{const t=this.get(r.id);if(['id','title','status','updated_at'].some(k=>r[k]!==t[k]))throw new TaskError('index/detail mismatch; run doctor');return t;});}
   mutate(id,expected,fn,work=false){const t=this.get(id);if(expected!=null&&expected!==t.revision)throw new TaskError(`revision conflict: expected ${expected}, current ${t.revision}; re-read before retrying`);if(work&&t.status==='completed')throw new TaskError('reopen a completed task with update --status executing --reason before changing its work');fn(t);t.revision++;if(work){t.work_revision++;t.completion=null;}t.updated_at=now();this.save(t);return t;}
 }
 export function freshness(t,hours,current=new Date()){if(TERMINAL.has(t.status))return t.status==='completed'?'Completion evidence recorded':'Archived outcome';if(!t.last_checked_at)return '⚠️ Not checked';return current-timestamp(t.last_checked_at)>hours*3600000?`⚠️ Check is stale (over ${hours} hours)`:`Checked within ${hours} hours (not live status)`;}
 export const last_check_label=t=>display_time(t.last_checked_at);
 export function step_focus(t){if(t.status==='completed')return 'Verified complete; no pending steps';if(t.status==='cancelled')return 'Cancelled; no next step';for(const state of ['executing','queued']){const s=t.steps.find(s=>s.state===state);if(s)return s.title;}return t.next_action||(t.steps.length?'All steps recorded as finished':'Next step not set');}
 export const UI_LABELS={en:{list_title:'Tasks',columns:['Title','Status','Summary'],empty:'No tasks',blocked:'Blocked',cancelled:'Cancelled',failed:'Failed',check_failed:'Verification failed',execution_failed:'Execution failed',execution_interrupted:'Execution interrupted',execution_disconnected:'Environment disconnected',observed:'observed',unplanned:'Next step not set',awaiting:'Checking results',recheck:'Reverification needed',goal:'Goal',next:'Next',last_checked:'Last checked',update_needed:'update needed',steps:'Steps',checks:'Checks',results:'Results'},zh:{list_title:'任务列表',columns:['标题','状态','信息描述'],empty:'暂无任务',blocked:'受阻',cancelled:'已取消',failed:'未达成',check_failed:'验证未通过',execution_failed:'执行失败',execution_interrupted:'执行中断',execution_disconnected:'执行环境断开',observed:'观察于',unplanned:'待安排下一步',awaiting:'正在核对结果',recheck:'需重新验收',goal:'目标',next:'下一步',last_checked:'最近核查',update_needed:'需更新',steps:'步骤',checks:'验证',results:'结果'}};
-export function visible_tasks(tasks,current=new Date(),include_all=false){return tasks.filter(t=>include_all||t.scheduling_summary||t.notification_summary||t.status!=='completed'||BigInt(current.getTime())*1000n-timestamp_us(t.updated_at)<600000000n);}
-export const status_cell=(t,language='en')=>userStatus(t,language);
+export function visible_tasks(tasks,current=new Date(),include_all=false){return selectTaskList(tasks,{all:include_all});}
+export const status_cell=(t,language='en')=>taskStatusLabel(t,language);
 function newest(events){return events.reduce((a,b)=>!a||timestamp_us(b.at)>timestamp_us(a.at)?b:a,null);}
 function status_reason(events){const text=newest(events.filter(e=>e.kind==='status'))?.text||'';const separator=/[:：]/.exec(text);return separator?text.slice(separator.index+1).trimStart():'';}
 export function latest_progress(t){return newest(t.events.filter(e=>['progress','note','decision'].includes(e.kind)))?.text||'';}
@@ -205,8 +207,22 @@ export function progress_summary(t,language='en'){if(t.status==='completed')retu
 export const table_cell=v=>safe_md(String(v).replace(/\r\n?/g,'\n'));
 export function compact_verification(t,language='en'){const ui=UI_LABELS[language],checks=current_checks(t);if(!checks.length)return t.checks.length?'- '+ui.recheck:t.status==='awaiting_verification'?'- '+ui.awaiting:'';return checks.sort(check_sort).map(c=>`- ${c.outcome==='pass'?'✅':'❌'} ${safe_md(c.name)}：${safe_md(c.evidence)}`).join('\n');}
 function substitute(template,values){return template.replace(/\$\$|\$\{([^}]+)\}|\$([a-zA-Z_][a-zA-Z0-9_]*)|\$/g,(full,a,b)=>{if(full==='$$')return '$';const key=a||b;if(!key||!has(values,key))throw new TaskError(`invalid or unknown template placeholder: ${full}`);return values[key];});}
-export function render_task(t,config,template,current=new Date(),language='en'){const ui=UI_LABELS[language],summary=progress_summary(t,language),sections=[];if(t.blocker&&!summary.includes(t.blocker))sections.push(ui.blocked+': '+safe_md(t.blocker));if(t.goal!==summary&&t.goal!==t.title)sections.push(ui.goal+': '+safe_md(t.goal));if(!['completed','cancelled'].includes(t.status)&&t.next_action&&t.next_action!==summary)sections.push(ui.next+': '+safe_md(t.next_action));if(!TERMINAL.has(t.status)&&t.execution.observed_at&&current-timestamp(t.execution.observed_at)>config.stale_hours*3600000)sections.push(ui.last_checked+': '+uiTime(t.execution.observed_at)+', '+ui.update_needed);if(t.steps.length)sections.push('## '+ui.steps+'\n\n'+t.steps.map(s=>`- ${UI_STEP_BADGES[s.state]} ${safe_md(s.title)}`+(s.state==='skipped'&&s.evidence?' · '+safe_md(s.evidence):'')).join('\n'));const v=compact_verification(t,language);if(v)sections.push('## '+ui.checks+'\n\n'+v);if(t.results.length)sections.push('## '+ui.results+'\n\n'+t.results.map(r=>'- '+md_link(r.label,r.url)).join('\n'));return substitute(template,{title:safe_md(t.title),id:t.id,updated_at:uiTime(t.updated_at),status_badge:status_cell(t,language),summary:summary===t.title?'':safe_md(summary),sections:sections.join('\n\n')}).trimEnd()+'\n';}
-export function render_list(tasks,config,template,link_details=false,current=new Date(),include_all=false,language='en'){const ui=UI_LABELS[language],rank={blocked:0,failed:1,executing:2,awaiting_verification:3,queued:4,completed:5,cancelled:6},rows=visible_tasks(tasks,current,include_all).sort((a,b)=>rank[a.status]-rank[b.status]||lex(a.id,b.id)).map(t=>{let title=table_cell(t.title);if(link_details)title=`[${title}](tasks/${t.id}.md)`;return `| ${title} | ${status_cell(t,language)} | ${table_cell(progress_summary(t,language))} |`;});return substitute(template,{list_title:ui.list_title,generated_at:uiTime(current.toISOString()),tasks:rows.length?'| '+ui.columns.join(' | ')+' |\n| --- | --- | --- |\n'+rows.join('\n'):ui.empty}).trimEnd()+'\n';}
+export function render_task(t,config,template,current=new Date(),language='en'){const ui=UI_LABELS[language],summary=progress_summary(t,language),sections=[];if(t.blocker&&!summary.includes(t.blocker))sections.push(ui.blocked+': '+safe_md(t.blocker));if(t.goal!==summary&&t.goal!==t.title)sections.push(ui.goal+': '+safe_md(t.goal));if(!['completed','cancelled'].includes(t.status)&&t.next_action&&t.next_action!==summary)sections.push(ui.next+': '+safe_md(t.next_action));if(!TERMINAL.has(t.status)&&t.execution.observed_at&&current-timestamp(t.execution.observed_at)>config.stale_hours*3600000)sections.push(ui.last_checked+': '+uiTime(t.execution.observed_at)+', '+ui.update_needed);if(t.steps.length)sections.push('## '+ui.steps+'\n\n'+t.steps.map(s=>`- ${UI_STEP_BADGES[s.state]} ${safe_md(s.title)}`+(s.state==='skipped'&&s.evidence?' · '+safe_md(s.evidence):'')).join('\n'));const v=compact_verification(t,language);if(v)sections.push('## '+ui.checks+'\n\n'+v);if(t.results.length)sections.push('## '+ui.results+'\n\n'+t.results.map(r=>'- '+md_link(r.label,r.url)).join('\n'));return substitute(template,{title:safe_md(t.title),id:t.id,updated_at:uiTime(t.updated_at),status_badge:status_cell(t,language),summary:summary===t.title?'':safe_md(summary),sections:sections.join('\n\n'),footer:(t.status==='completed'?(language==='zh'?'完成于：':'Completed: '):(language==='zh'?'更新于：':'Updated: '))+uiTime(t.status==='completed'?t.completion.at:t.updated_at)+' · Asia/Shanghai'}).trimEnd()+'\n';}
+export function render_list(tasks,config,template,link_details=false,current=new Date(),include_all=false,language='en') {
+  const ui=UI_LABELS[language],zh=language==='zh',rank={blocked:0,executing:1,awaiting_verification:2,queued:3,completed:4,failed:5,cancelled:6};
+  const selected=visible_tasks(tasks,current,include_all).sort((a,b)=>rank[a.status]-rank[b.status]),groups=new Map();
+  for(const t of selected){if(!groups.has(t.status))groups.set(t.status,[]);groups.get(t.status).push(t);}
+  const sections=[...groups.values()].map(group=>{
+    const entries=group.map(t=>{
+      const title=link_details?`[${table_cell(t.title)}](tasks/${t.id}.md)`:table_cell(t.title);
+      return `**${title}**\n\n${table_cell(progress_summary(t,language))}`;
+    });
+    return `## ${status_cell(group[0],language)} · ${group.length}\n\n`+entries.join('\n\n');
+  });
+  const footer=(zh?'核对于：':'Checked: ')+uiTime(current.toISOString())+' · Asia/Shanghai';
+  const scope=include_all?(zh?'本次展示全部本地任务。':'All local task records shown.'):(zh?`本次展示 ${selected.length} 个活跃任务 · 最近更新优先，最多 10 项`:`Showing ${selected.length} active tasks · most recently updated, at most 10`);
+  return substitute(template,{list_title:ui.list_title,generated_at:uiTime(current.toISOString()),tasks:sections.length?sections.join('\n\n---\n\n'):ui.empty,footer,coverage:scope}).trimEnd()+'\n';
+}
 export function write_output(p,content,store){const target=canonical_path(p),relative=path.relative(store.root,target);if(!relative||(!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative)))throw new TaskError('render outputs must be outside the authoritative task store');atomic_write(target,content);return target;}
 
 const COMMAND_OPTIONS={
@@ -220,7 +236,7 @@ const COMMAND_OPTIONS={
 const DEFAULT_TEMPLATES=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../ui');
 export function help(command) {
   const first='taskctl — task management and scheduling (Node.js 22.18+)\n';
-  if(command&&has(COMMAND_OPTIONS,command))return first+`Usage: node taskctl.mjs [--store PATH] ${command}${['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS,...CONVERSATION_IDS].includes(command)?' ID':command==='render'?' list|detail|bundle [ID]':''} [options]\nOptions: `+COMMAND_OPTIONS[command].map(o=>'--'+o).join(', ')+'\nSee references/cli.md for required fields and examples.\n';
+  if(command&&has(COMMAND_OPTIONS,command))return first+`Usage: node taskctl.mjs [--store PATH] ${command}${['update','step','event','observe','check','result','complete','show',...SCHEDULER_IDS,...INTEGRATION_IDS,...CONVERSATION_IDS].includes(command)?' ID':command==='render'?' list|detail|bundle [ID]':''} [options]\nOptions: `+COMMAND_OPTIONS[command].map(o=>'--'+o).join(', ')+'\n'+(['list','render'].includes(command)?'Default lists show the 10 most recently updated active tasks. --all includes history; list --status explicitly selects a state.\n':'')+'See references/cli.md for required fields and examples.\n';
   return first+'Usage: node taskctl.mjs [--store PATH] [--lock-timeout SECONDS] COMMAND [options]\nCommands: '+Object.keys(COMMAND_OPTIONS).join(', ')+'\nUse COMMAND --help for command options.\n';
 }
 export function default_store({ env = process.env, platform = process.platform, home = os.homedir(), dot_shared = fs.existsSync('/workspace/shared') } = {}) {
@@ -296,7 +312,7 @@ export async function run(args) {
       if(args.source_ref!==undefined)return scheduler.register(args,make);
       const t=make();store.save(t,true);return t;
     }
-    if(cmd==='list')return visible_tasks(store.all(),new Date(),args.all).filter(t=>!args.status||t.status===args.status).map(index_row);
+    if(cmd==='list')return store.selected({all:args.all,status:args.status}).map(index_row);
     if(cmd==='show')return store.get(args.id);
     if(['doctor','verify'].includes(cmd)){
       const tasks=store.all(),known=tasks.map(t=>t.id).sort(),directory=store.path('tasks'),found=fs.existsSync(directory)?fs.readdirSync(directory).sort():[];
@@ -312,7 +328,7 @@ export async function run(args) {
     if(cmd==='render'){
       let content,tasks;
       if(args.view==='detail'){if(!args.id)throw new TaskError('detail requires a task ID');content=render_task(decorateNotifications(store,scheduler.decorate([store.get(args.id)],args.language),args.language)[0],config,fs.readFileSync(path.join(args.templates,'task-detail.md'),'utf8'),new Date(),args.language);}
-      else{if(args.id)throw new TaskError('only detail accepts a task ID');tasks=decorateNotifications(store,scheduler.decorate(store.all(),args.language),args.language);content=render_list(tasks,config,fs.readFileSync(path.join(args.templates,'list.md'),'utf8'),args.view==='bundle',new Date(),args.all,args.language);}
+      else{if(args.id)throw new TaskError('only detail accepts a task ID');tasks=decorateNotifications(store,scheduler.decorate(store.selected({all:args.all}),args.language),args.language);content=render_list(tasks,config,fs.readFileSync(path.join(args.templates,'list.md'),'utf8'),args.view==='bundle',new Date(),args.all,args.language);}
       if(args.view!=='detail'){
         const failures=requestFailures(store),zh=args.language==='zh';
         if(failures.length)content+='\n## '+(zh?'未创建的请求':'Requests not created')+'\n\n'+failures.map(r=>'❌ '+(zh?'失败':'Failed')+' · '+(zh?'请求 ID: ':'Request ID: ')+r.id+' · '+uiTime(r.at)+'\n\n'+(r.stage==='parse'?(zh?'正文解析：':'Content parsing: '):(zh?'任务创建：':'Task creation: '))+safe_md(r.reason)).join('\n\n')+'\n';

@@ -347,10 +347,10 @@ test('pending enqueue transaction is recovered before the next scan', async t =>
   assert.equal((await f.batch()).batch[0].id, 'request-one');
 });
 
-test('Markdown keeps three columns, escapes task text and shows scheduling without changing task facts', async t => {
+test('grouped Markdown shows scheduling without changing task facts', async t => {
   const f = fixture(t); await f.init(); const task = await f.register();
   await f.schedule('request-one', { not_before: '2099-01-01T00:00:00Z' });
-  const list = await f.call('render', 'list'); assert.match(list, /Title \| Status \| Summary/); assert.match(list, /Scheduled/);
+  const list = await f.call('render', 'list'); assert.match(list, /## In progress · 1/); assert.match(list, /Scheduled/);
   assert.match(await f.call('render', 'detail', task.id), /Scheduled/);
   assert.match(await f.call('render', 'list', '--language', 'zh'), /等待调度/);
   assert.deepEqual(await f.call('show', task.id), task);

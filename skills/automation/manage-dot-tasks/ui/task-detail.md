@@ -1,9 +1,9 @@
-# $title · <sub>$updated_at</sub>
-
-ID: $id
+# $title
 
 $status_badge
 
 $summary
 
 $sections
+
+*$footer*

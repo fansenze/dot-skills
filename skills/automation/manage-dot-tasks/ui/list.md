@@ -1,3 +1,7 @@
-# $list_title · <sub>$generated_at</sub>
+# $list_title
 
 $tasks
+
+$coverage
+
+*$footer*

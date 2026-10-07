@@ -20,12 +20,12 @@ function validate(value, definition) {
     assert.ok([].concat(definition.type).includes(actual),JSON.stringify({value,type:definition.type})); }
   if(typeof value==='string') { if(definition.minLength) assert.ok(value.length>=definition.minLength); if(definition.maxLength) assert.ok(value.length<=definition.maxLength); if(definition.pattern) assert.match(value,new RegExp(definition.pattern)); }
   if(typeof value==='number') { if(definition.minimum!==undefined) assert.ok(value>=definition.minimum); if(definition.maximum!==undefined) assert.ok(value<=definition.maximum); }
-  if(Array.isArray(value)) { if(definition.minItems!==undefined) assert.ok(value.length>=definition.minItems); if(definition.maxItems) assert.ok(value.length<=definition.maxItems);value.forEach(v=>validate(v,definition.items)); }
+  if(Array.isArray(value)) { if(definition.minItems!==undefined) assert.ok(value.length>=definition.minItems); if(definition.maxItems) assert.ok(value.length<=definition.maxItems);if(definition.items)value.forEach(v=>validate(v,definition.items)); }
   if(value&&typeof value==='object'&&!Array.isArray(value)) {
     for(const key of definition.required??[]) assert.ok(Object.hasOwn(value,key),key);
     if(definition.additionalProperties===false) for(const key of Object.keys(value)) assert.ok(key in definition.properties,key);
     for(const [key,child] of Object.entries(definition.properties??{})) if(key in value) validate(value[key],child);
-    for(const condition of definition.allOf??[]) if(Object.entries(condition.if.properties).every(([k,v])=>value[k]===v.const)) validate(value,condition.then);
+    for(const condition of definition.allOf??[]) if((condition.if.required??[]).every(k=>Object.hasOwn(value,k))&&Object.entries(condition.if.properties??{}).every(([k,v])=>value[k]===v.const)) validate(value,condition.then);
   }
 }
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'connector-examples-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
@@ -35,7 +35,7 @@ test('documented CLI transcript executes with no credentials and normalized reco
   const vars={ADAPTER:path.join(ROOT,'tests/fixtures/connector.mjs'),SETTINGS:settings};
   const examples=json(path.join(ROOT,'tests/interface-examples.json'));assert.equal(examples.protocol_version,1);
   for(const args of examples.commands) { const result=await run(parse_args(['--store',store,...args.map(v=>v.replace(/\$\{(\w+)\}/g,(_,k)=>vars[k]))]));
-    if(args[0]==='render') { assert.match(result,/Title \| Status \| Summary/);assert.match(result,/Notifications pending/); }
+    if(args[0]==='render') { assert.match(result,/## Pending · 1/);assert.match(result,/Notifications pending/); }
     if(args[0]==='doctor') assert.equal(result.ok,true);
   }
   const data=json(path.join(store,'integration.json'));
@@ -87,6 +87,7 @@ test('document schema supports all response templates and still rejects unknown 
  const responses=[
   {template:'ack',lead:'Received.'},
   {template:'list',lead:'No tasks in scope.',items:[],coverage:{shown:0,total:0}},
+  {template:'list',lead:'No active tasks found.',list_scope:'recent_active',items:[],coverage:{shown:0,total:null},data_time:'2026-10-07T00:00:00.123456Z',time_label:'Checked'},
   {template:'detail',lead:'First line.\nSecond line.',sections:[{title:'Next',items:['Confirm scope']}],links:[{label:'Document',url:'https://example.com/report'}]},
   {template:'decision',lead:'Which scope?',options:[{label:'Current release',description:'Use the approved changes'}]},
   {template:'brief',lead:'Scope is still pending.',data_time:'2026-10-05T01:02:03Z',source:'Authorized ledger'}

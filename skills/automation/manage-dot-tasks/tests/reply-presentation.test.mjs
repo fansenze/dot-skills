@@ -182,3 +182,47 @@ test('twenty mixed-status list items group by normalized status with per-page co
  }
  assert.equal(JSON.stringify(response),before,'group rendering does not reorder semantic input');
 });
+
+test('default Markdown and native cards preserve the same bounded list with distinct groups and footer time',()=>{
+ const response={template:'list',title:'Active work',lead:'Confirm the release scope.',list_scope:'recent_active',items:[
+  {title:'Release notes',status:'Blocked',summary:'Draft ready',blocker:'Confirm the scope'},
+  {title:'Guide',status:'Awaiting verification',summary:'Checking installation'}
+ ],coverage:{shown:2,total:null},data_time:'2026-10-07T01:02:03.123456Z',time_label:'Checked'};
+ const markdown=renderResponse(response),card=renderResponse(response,'card');
+ assert.equal(markdown,renderResponse(response,'markdown'));
+ assert.match(markdown,/---\n\n## Blocked/);assert.match(markdown,/---\n\n## Awaiting verification/);
+ const groups=card.elements.filter(e=>e.tag==='column_set'&&e.background_style==='grey');
+ assert.equal(groups.length,2);assert.ok(groups.every(e=>e.margin==='24px 0px 12px 0px'));
+ assert.equal(card.elements[card.elements.indexOf(groups[1])-1].tag,'hr');
+ for(const rendered of [markdown,stringContents(card).join('\n')]){
+  for(const value of ['Release notes','Guide','Confirm the scope','Checking installation','2026-10-07 09:02:03','Asia/Shanghai'])assert.ok(rendered.includes(value),value);
+  assert.doesNotMatch(rendered,/已完整展示|2\/2/);
+  assert.equal(rendered.split('Blocked').length-1,1,'group label is not repeated on each item');
+ }
+ assert.equal(card.elements.at(-1).tag,'note');assert.match(card.elements.at(-1).elements[0].content,/Checked/);
+ assert.doesNotMatch(card.header.title.content,/2026/);
+ for(const invalid of [
+  {...response,coverage:{shown:3,total:null}},
+  {...response,items:Array.from({length:11},()=>({title:'Task'})),coverage:{shown:11,total:null}},
+  {...response,template:'detail'},
+  {...response,list_scope:'all'},
+  {...response,data_time:undefined},
+  {...response,time_label:'Checked\nCompleted'}
+ ])assert.throws(()=>validateResponse(invalid));
+ assert.doesNotThrow(()=>validateResponse({...response,list_scope:'history'}));
+});
+
+test('detail sections, decision options, brief metadata and hostile headings remain plain content in cards',()=>{
+ const heading='<at user_id="all">**choose**</at>';
+ for(const response of [
+  {...samples.detail,status:'Awaiting verification',time_label:'Updated',data_time:time,sections:[{title:heading,items:['Check pending']}]},
+  {...samples.decision,options:[{label:heading,description:'An explanation, not an action'}],data_time:time},
+  samples.brief
+ ]){
+  const card=renderResponse(response,'card');
+  assert.ok(objects(card).every(o=>!['markdown','lark_md'].includes(o.tag)));
+  assert.ok(objects(card).filter(o=>o.tag==='button').every(o=>o.url&&!o.value));
+  assert.ok(stringContents(card).includes(response.lead));
+  if(response!==samples.brief)assert.ok(stringContents(card).some(s=>s.includes(heading)));
+ }
+});

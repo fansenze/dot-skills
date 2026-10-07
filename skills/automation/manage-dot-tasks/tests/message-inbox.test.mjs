@@ -261,7 +261,7 @@ test('authorized parse failure is visible and replied once; spoofed and duplicat
   assert.equal(f.state().outbox.length,1);assert.deepEqual((await f.next()).messages,[]);assert.deepEqual(await f.call('list','--all'),[]);
   const output=await f.call('render','list','--language','zh');assert.match(output,/未创建的请求/);assert.match(output,/失败/);assert.match(output,/正文解析/);
   await f.call('deliver','--consumer','sender');await f.call('deliver','--consumer','sender');
-  const effects=lines(path.join(f.external,'effects.jsonl'));assert.equal(effects.length,1);assert.equal(effects[0].reply_to,'message-1');assert.equal(effects[0].reply_in_thread,true);assert.match(effects[0].body.details.join('\n'),/尚未创建或执行任务/);
+  const effects=lines(path.join(f.external,'effects.jsonl'));assert.equal(effects.length,1);assert.equal(effects[0].reply_to,'message-1');assert.equal(effects[0].reply_in_thread,true);assert.match(JSON.stringify(effects[0].body),/尚未创建或执行任务/);
   assert.equal((await f.call('doctor')).ok,true);
 });
 
@@ -316,6 +316,22 @@ test('reviewed historical rejection can be shown as failure without replay, repl
 });
 
 const responseDecision=(response,fields={})=>({decision:'query',summary:'已核对当前任务',response,...fields});
+
+test('default list snapshot is bounded, active and grant-scoped while association context retains history',async t=>{
+ const f=await fixture(t),ids=Array.from({length:12},(_,i)=>'task-active-'+String(i).padStart(2,'0'));
+ for(const id of ids)await f.register(id);
+ await f.register('task-history');await f.call('update','task-history','--status','cancelled','--reason','Synthetic cancellation');
+ await f.register('task-outside');
+ await f.grant({tasks:[...ids,'task-history'].join(',')});await f.ingest(f.incoming());
+ const message=(await f.next()).messages[0],list=message.context.task_list;
+ assert.equal(list.limit,10);assert.equal(list.total,null);assert.equal(list.scope,'recent_active');assert.equal(list.tasks.length,10);
+ assert.ok(Number.isFinite(Date.parse(list.observed_at)));
+ assert.ok(list.tasks.every(task=>ids.includes(task.id)&&task.status==='executing'));
+ assert.ok(message.context.tasks.some(task=>task.id==='task-history'),'history remains available for association, not the default list');
+ assert.ok(!message.context.tasks.some(task=>task.id==='task-outside'));
+ assert.match(message.prompt,/Use Markdown by default/);assert.match(message.prompt,/context.task_list/);
+ assert.deepEqual(await f.call('queue'),[]);
+});
 
 test('structured response records multiline presentation with the immutable route and legacy adapter shape',async t=>{
  const f=await fixture(t);await f.grant();await f.ingest(f.incoming());const message=(await f.next()).messages[0];

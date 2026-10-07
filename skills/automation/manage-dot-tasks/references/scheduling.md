@@ -227,8 +227,7 @@ still apply; a failed check prevents completion.
 `queue [--task-id ID] [--all]` exposes scheduling details with lease tokens hidden.
 `render list`, `render detail` and `render bundle` show pending schedules, retries,
 reconciliation and failures in the existing Summary column. Task content,
-blockers and failed checks remain visible. Records with active scheduling stay
-visible even if their task was completed more than ten minutes ago.
+blockers and failed checks remain visible. Default lists are limited to ten recent active tasks. Inspect scheduling on terminal tasks through `queue`, a detail view or `render list --all`.
 
 The optional `scheduler.json` is created on the first scheduling/discovery write.
 Legacy task schema and projections remain readable without modification. This

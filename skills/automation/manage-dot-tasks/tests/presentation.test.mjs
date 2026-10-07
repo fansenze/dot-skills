@@ -23,13 +23,13 @@ test('all internal states map to exactly four Chinese statuses and preserve bloc
  }
  assert.deepEqual([...seen].sort(),['排队中','执行中','成功','失败'].sort());
 });
-test('Shanghai seconds are shared by Markdown/card titles and actual completion timestamps',()=>{
+test('Markdown footers use actual completion time while legacy card titles retain update time',()=>{
  assert.equal(uiTime('2026-10-04T01:02:03.123456Z'),'2026-10-04 09:02:03');
  const task={...fixture,title:'虚构/演示任务',goal:'虚构/演示任务',summary:'虚构/演示任务',status:'completed',blocker:'',steps:[],checks:[],results:[],completion:{at:'2026-10-04T01:02:03Z',summary:'演示成果已核对'},updated_at:'2026-10-04T01:03:04Z'};
  const now=new Date('2026-10-04T01:04:05Z');
  const detail=render_task(task,config,template('task-detail.md'),now,'zh');
- assert.match(detail.split('\n')[0],/^# 虚构\/演示任务 · <sub>2026-10-04 09:03:04<\/sub>$/);assert.equal(detail.split(task.title).length-1,1);assert.match(detail,/ID: task-legacy/);assert.match(detail,/成功 · 2026-10-04 09:02:03/);
- const list=render_list([task],config,template('list.md'),false,now,false,'zh');assert.match(list.split('\n')[0],/任务列表.*2026-10-04 09:04:05/);
+ assert.equal(detail.split('\n')[0],'# 虚构/演示任务');assert.equal(detail.split(task.title).length-1,1);assert.doesNotMatch(detail,/ID: task-legacy/);assert.match(detail,/已完成/);assert.match(detail,/完成于：2026-10-04 09:02:03/);assert.doesNotMatch(detail,/09:03:04/);
+ const list=render_list([task],config,template('list.md'),false,now,true,'zh');assert.match(list,/核对于：2026-10-04 09:04:05/);assert.ok(list.lastIndexOf('09:04:05')>list.indexOf(task.title));
  const adapter=createConnector({server:fileURLToPath(new URL('../scripts/taskctl.mjs',import.meta.url)),config_ref:'/tmp/unused-fixture',state_dir:'/tmp',account_id:'fixture',brand:'feishu'});
  const card=adapter.render('card',taskDocument([task]));assert.equal(card.header.title.content,task.title+' · 2026-10-04 09:03:04');assert.ok(card.elements.every(e=>e.tag!=='column_set'));
 });
@@ -51,20 +51,20 @@ test('failed cards preserve the outcome reason and useful next action despite an
 });
 
 
-test('structured task-list projection keeps legacy rows and makes the twenty-item limit explicit',()=>{
+test('structured task-list projection bounds both legacy rows and semantic items to ten active records',()=>{
  for(const count of [0,1,21]){
   const tasks=Array.from({length:count},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'Reviewed summary',blocker:'',checks:[],results:[]}));
   const doc=taskResponseDocument(tasks,'en',false);
-  assert.equal(doc.rows.length,count);assert.equal(doc.response.template,'list');assert.equal(doc.response.items.length,Math.min(count,20));
-  assert.deepEqual(doc.response.coverage,{shown:Math.min(count,20),total:count});
+  assert.equal(doc.rows.length,Math.min(count,10));assert.equal(doc.response.template,'list');assert.equal(doc.response.items.length,Math.min(count,10));
+  assert.deepEqual(doc.response.coverage,{shown:Math.min(count,10),total:null});
  }
 });
 
 test('oversized task projections explicitly mark clipped content and preserve accurate item coverage',()=>{
  const tasks=Array.from({length:20},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'字'.repeat(2000),blocker:'',checks:[],results:[]}));
  const doc=taskResponseDocument(tasks,'en',false);
- assert.equal(doc.rows.length,20);assert.ok(doc.response.items.length>0&&doc.response.items.length<20);
- assert.deepEqual(doc.response.coverage,{shown:doc.response.items.length,total:20});
+ assert.equal(doc.rows.length,10);assert.ok(doc.response.items.length>0&&doc.response.items.length<=10);
+ assert.deepEqual(doc.response.coverage,{shown:doc.response.items.length,total:null});
  assert.ok(doc.response.items.every(item=>item.summary.includes('partial; inspect task details')));
  assert.ok(Buffer.byteLength(JSON.stringify(doc.response))<=24*1024);
 });
@@ -87,14 +87,14 @@ test('blank task summaries preserve their list item and omit only the optional e
  const task={...fixture,title:'Empty summary task',status:'queued',summary:'',next_action:'',blocker:'',events:[],checks:[],results:[]};
  const response=taskResponseDocument([task],'en',false).response;
  assert.equal(response.items.length,1);assert.equal(response.items[0].title,task.title);assert.equal(response.items[0].summary,undefined);
- assert.deepEqual(response.coverage,{shown:1,total:1});
+ assert.deepEqual(response.coverage,{shown:1,total:null});
 });
 
 
 test('task-list render expansion stays bounded with explicit coverage in every format',()=>{
  const tasks=Array.from({length:20},(_,i)=>({...fixture,id:'task-'+i,title:'Task '+i,summary:'*'.repeat(900),blocker:'',checks:[],results:[]}));
  const response=taskResponseDocument(tasks,'en',false).response;
- assert.ok(response.items.length>0&&response.items.length<20);assert.deepEqual(response.coverage,{shown:response.items.length,total:20});
+ assert.ok(response.items.length>0&&response.items.length<=10);assert.deepEqual(response.coverage,{shown:response.items.length,total:null});
  for(const format of ['text','markdown','card'])assert.ok(Buffer.byteLength(JSON.stringify(renderResponse(response,format)))<=28000);
 });
 
@@ -105,4 +105,18 @@ test('automatic clipping of supplementary characters never leaves malformed Unic
   const walk=value=>{if(typeof value==='string')assert.ok(value.isWellFormed());else if(value&&typeof value==='object')Object.values(value).forEach(walk);};walk(response);
  }
  assert.match(list.items[0].summary,/partial/);assert.match(detail.title,/partial/);
+});
+
+test('verbose detail enrichment stays deliverable with visible blockers, failed checks and partial notices',()=>{
+ for(const letter of ['字','*']){
+  const task={...fixture,title:'Synthetic verbose task',status:'failed',summary:letter.repeat(2000),goal:letter.repeat(4000),blocker:letter.repeat(1000),next_action:letter.repeat(1000),
+   events:[{kind:'status',text:'executing -> failed: '+letter.repeat(1000)}],
+   steps:Array.from({length:8},()=>({title:letter.repeat(1000),state:'skipped',evidence:letter.repeat(1000)})),
+   checks:Array.from({length:5},(_,i)=>({name:'Current failure '+i,outcome:'fail',evidence:letter.repeat(1000),work_revision:fixture.work_revision})),
+   results:Array.from({length:10},(_,i)=>({label:'Verified result '+i,url:'https://example.com/'+letter.replace('*','x').repeat(600)+i}))};
+  const response=taskResponseDocument([task],'en',true).response;
+  for(const format of ['text','markdown','card'])assert.ok(Buffer.byteLength(JSON.stringify(renderResponse(response,format)))<=28000);
+  assert.match(JSON.stringify(response.sections),/Blocked|Current failure 0|More failed checks omitted|More steps omitted|partial/);
+  assert.equal(response.status,'Failed');
+ }
 });

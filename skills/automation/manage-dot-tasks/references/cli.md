@@ -49,11 +49,11 @@ The example URL illustrates syntax; replace it with a verified result. `complete
 - `check ID --name TEXT --outcome pass|fail --evidence TEXT [--checked-at TIMESTAMP]`
 - `result ID --label TEXT --url URL`: record a verified HTTPS, HTTP, or Library result link; credential-bearing and script URLs are rejected.
 - `complete ID --summary TEXT --evidence TEXT`: record verified completion using current checks.
-- `list [--status STATE] [--all]`: return the lightweight index; completed tasks inactive for ten minutes are hidden by default.
+- `list [--status STATE] [--all]`: return up to ten active index records, most recently updated first. `--status` explicitly selects up to ten recent records of any one state (including terminal states). `--all` includes history and removes the limit; it can be combined with `--status`.
 - `show ID`: return the full task record.
-- `render list [--all] [--output FILE]`: render the three-column list with the same default filter.
+- `render list [--all] [--output FILE]`: render status-grouped Markdown entries with the same default filter and a footer timestamp.
 - `render detail ID [--output FILE]`: render a concise detail view; use `show` for the full record.
-- `render bundle [--all] --output DIRECTORY`: generate a list and linked detail files.
+- `render bundle [--all] --output DIRECTORY`: generate the selected list and its linked detail files; the default fetches at most ten active tasks.
 - `render ... [--language en|zh]`: select fixed view labels; English is the default. User content is not translated.
 - `render ... [--templates DIRECTORY]`: use custom `list.md` and `task-detail.md` templates.
 - `doctor` / `verify`: check local structure, index, projections, and completion records. These commands do not perform external acceptance checks or verify memory.

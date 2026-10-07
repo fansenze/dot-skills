@@ -460,6 +460,5 @@ validity, or an actual task outcome.
 
 Inspect conversation state separately from task state, scheduler state, and
 legacy notification state. List/detail notification summaries include canonical
-delivery state, and unresolved delivery keeps a completed task visible rather
-than hiding its missing result. Report blocked or uncertain stages accurately. Do not
+delivery state, and unresolved delivery remains inspectable in detail/history views and the delivery queue. The default list includes only the ten most recently updated active tasks. Report blocked or uncertain stages accurately. Do not
 activate the workflow or migrate a real binding merely to validate this file.

@@ -563,7 +563,7 @@
         "data_time": {
           "type": "string",
           "format": "date-time",
-          "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{3})?(?:Z|[+-]\\d\\d:\\d\\d)$",
+          "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,6})?(?:Z|[+-]\\d\\d:\\d\\d)$",
           "description": "Runtime checks calendar validity and rejects normalized impossible dates."
         },
         "source": {
@@ -585,9 +585,13 @@
               "maximum": 9007199254740991
             },
             "total": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "minimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 9007199254740991,
+              "description": "Use null when the total for the queried scope is unknown; never infer completeness from a bounded page."
             }
           },
           "additionalProperties": false
@@ -610,10 +614,30 @@
             }
           },
           "additionalProperties": false
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069\\u0009\\u000a\\u000d]+$"
+        },
+        "time_label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^(?!\\s*$)[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u2028-\\u202e\\u2066-\\u2069\\u0009\\u000a\\u000d]+$"
+        },
+        "list_scope": {
+          "enum": [
+            "recent_active",
+            "history",
+            "selected"
+          ],
+          "description": "Only for list. recent_active has at most ten items; the caller selects and verifies active records before rendering."
         }
       },
       "additionalProperties": false,
-      "description": "Plain-content presentation. Serialized response is at most 24576 UTF-8 bytes; selected rendered JSON is at most 28000 bytes. Runtime validates byte limits, coverage.shown equals items.length, coverage.total >= shown, supported format, and format authorization reference equals the current incoming message or scoped claim ID.",
+      "description": "Plain-content presentation. Serialized response is at most 24576 UTF-8 bytes; selected rendered JSON is at most 28000 bytes. Runtime validates byte limits, coverage.shown equals items.length, coverage.total is null or >= shown; time_label requires data_time; list_scope requires list; recent_active has at most ten items, supported format, and format authorization reference equals the current incoming message or scoped claim ID.",
       "allOf": [
         {
           "if": {
@@ -733,6 +757,51 @@
               "data_time",
               "source"
             ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "time_label"
+            ]
+          },
+          "then": {
+            "required": [
+              "data_time"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "list_scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "template": {
+                "const": "list"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "list_scope"
+            ],
+            "properties": {
+              "list_scope": {
+                "const": "recent_active"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "items": {
+                "maxItems": 10
+              }
+            }
           }
         }
       ]

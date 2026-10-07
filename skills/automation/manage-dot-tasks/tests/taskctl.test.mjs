@@ -115,7 +115,7 @@ test('list and detail have distinct information density', t => {
   const list = l.call('render', 'list'), detail = l.call('render', 'detail', 'task-example');
   assert.ok(!list.includes('GOAL-DETAIL-ONLY'));
   assert.match(list, /EVENT/); assert.match(detail, /GOAL/); assert.match(detail, /EVENT/);
-  assert.ok(list.includes('| Title | Status | Summary |'));
+  assert.match(list,/## In progress · 1/);assert.doesNotMatch(list,/^\|/m);
   assert.ok(!detail.includes('进展时间线')); assert.ok(!list.includes('查看任务'));
 });
 
@@ -149,7 +149,7 @@ test('execution-completed observation does not complete the task', t => {
   const l = ledger(t); l.register();
   const task = l.call('observe', 'task-example', '--state', 'completed', '--source', 'task API');
   assert.equal(task.status, 'executing'); assert.equal(task.completion, null);
-  const detail = l.call('render', 'detail', 'task-example'); assert.ok(detail.includes('🚧')); assert.ok(!detail.includes('✅'));
+  const detail = l.call('render', 'detail', 'task-example'); assert.ok(detail.includes('In progress')); assert.ok(!detail.includes('✅'));
 });
 
 test('inProgress observation does not claim live execution health', t => {
@@ -221,7 +221,7 @@ test('concurrent events never lose updates', async t => {
 test('concurrent registrations preserve every lightweight index row', async t => {
   const l = ledger(t);
   await Promise.all(Array.from({ length: 16 }, (_, i) => cliAsync(l.root, ['register', '--id', `task-${String(i).padStart(3, '0')}`, '--title', String(i), '--goal', 'g'])));
-  assert.equal(l.call('list').length, 16); assert.equal(l.call('doctor').ok, true);
+  assert.equal(l.call('list','--all').length, 16); assert.equal(l.call('doctor').ok, true);
 });
 
 test('interrupted transaction recovers authoritative and derived files', t => {
@@ -344,9 +344,9 @@ test('init never adopts or overwrites an unrecognized nonempty directory', t => 
 });
 
 // Compact UI regression scenarios; these preserve the latest user-requested UI.
-test('completed inactivity filtering changes at exactly ten minutes', t => {
+test('default active lists exclude terminal tasks regardless of recent activity', t => {
   const l = ledger(t), task = l.completed(), start = m.timestamp(task.updated_at).getTime();
-  assert.equal(m.visible_tasks([task], new Date(start + 599999)).length, 1);
+  assert.equal(m.visible_tasks([task], new Date(start + 599999)).length, 0);
   assert.deepEqual(m.visible_tasks([task], new Date(start + 600000)), []);
   assert.equal(m.visible_tasks([task], new Date(start + 600000), true).length, 1);
   assert.equal(task.status, 'completed');
@@ -355,30 +355,33 @@ test('completed inactivity filtering changes at exactly ten minutes', t => {
 test('later activity preserves the real completion timestamp', t => {
   const l = ledger(t), task = l.completed(), completedAt = task.completion.at;
   task.updated_at = new Date(m.timestamp(completedAt).getTime() + 7200000).toISOString();
-  assert.equal(m.visible_tasks([task], new Date(m.timestamp(task.updated_at).getTime() + 599000)).length, 1);
+  assert.equal(m.visible_tasks([task], new Date(m.timestamp(task.updated_at).getTime() + 599000)).length, 0);
   const status = m.status_cell(task);
-  assert.equal(status, '✅ Succeeded · ' + uiTime(completedAt)); assert.ok(!status.includes(uiTime(task.updated_at)));
+  assert.equal(status, 'Completed');
+  const view=m.render_task(task,{stale_hours:24},text(fileURLToPath(new URL('../ui/task-detail.md',import.meta.url))));
+  assert.ok(view.includes('Completed: '+uiTime(completedAt)));assert.ok(!view.includes(uiTime(task.updated_at)));
 });
 
-test('unfinished and failed tasks stay visible regardless of age', t => {
+test('active tasks stay visible regardless of age while terminal tasks need an explicit query', t => {
   const l = ledger(t), task = l.register(), current = new Date(m.timestamp(task.updated_at).getTime() + 300 * 86400000);
   for (const state of ['queued', 'executing', 'blocked', 'awaiting_verification', 'failed', 'cancelled']) {
-    task.status = state; assert.equal(m.visible_tasks([task], current).length, 1, state);
+    task.status = state; assert.equal(m.visible_tasks([task], current).length, ['failed','cancelled'].includes(state)?0:1, state);
+    assert.equal(m.visible_tasks([task], current, true).length, 1, state);
   }
 });
 
-test('three-column Markdown escapes pipes, multiline content and HTML', t => {
+test('grouped Markdown escapes task text, multiline content and HTML', t => {
   const l = ledger(t); l.register({ title: 'A|B\nC', summary: 'first|second\r\nthird <b>x</b>' });
   const rendered = l.call('render', 'list');
   assert.ok(rendered.includes('A\\|B · C')); assert.ok(rendered.includes('first\\|second · third &lt;b&gt;x&lt;/b&gt;'));
-  const rows = rendered.split('\n').filter(line => line.startsWith('|')); assert.equal(rows.length, 3);
-  assert.equal((rows[2].match(/(?<!\\)\|/g) || []).length, 4);
+  assert.doesNotMatch(rendered, /^\|/m);
+  assert.doesNotMatch(rendered, /(?<!\\)\||<b>/);
 });
 
-test('queued uses clock and active states have no completion time', t => {
-  const l = ledger(t), task = l.register({ status: 'queued' }); assert.equal(m.status_cell(task), '🕒 Pending');
-  task.status = 'executing'; assert.equal(m.status_cell(task), '🚧 In progress');
-  task.status = 'awaiting_verification'; assert.equal(m.status_cell(task), '🚧 In progress');
+test('active Markdown states distinguish queued, executing and verification without completion timestamps', t => {
+  const l = ledger(t), task = l.register({ status: 'queued' }); assert.equal(m.status_cell(task), 'Pending');
+  task.status = 'executing'; assert.equal(m.status_cell(task), 'In progress');
+  task.status = 'awaiting_verification'; assert.equal(m.status_cell(task), 'Awaiting verification');
 });
 
 test('short summary does not remove the full current blocker from detail', t => {
@@ -397,16 +400,16 @@ test('current failures remain visible alongside a concise summary', t => {
 test('explicit Chinese labels do not translate original task content', t => {
   const l = ledger(t); l.register({ title: 'Original title 中文', summary: '原始进展 unchanged' });
   const en = l.call('render', 'list'), zh = l.call('render', 'list', '--language', 'zh');
-  assert.ok(en.includes('# Tasks')); assert.ok(zh.includes('# 任务列表')); assert.ok(zh.includes('| 标题 | 状态 | 信息描述 |'));
+  assert.ok(en.includes('# Tasks')); assert.ok(zh.includes('# 任务列表')); assert.ok(zh.includes('## 执行中 · 1'));
   for (const output of [en, zh]) { assert.ok(output.includes('Original title 中文')); assert.ok(output.includes('原始进展 unchanged')); }
 });
 
 test('failed tasks retain summary, transition reason and useful remedy', t => {
   const l = ledger(t); l.register({ summary: 'Certificate expired', next_action: 'Renew the certificate' });
   l.call('update', 'task-example', '--status', 'failed', '--reason', 'HTTPS certificate expired');
-  assert.ok(l.call('render', 'list').includes('Failed: Certificate expired'));
+  assert.ok(l.call('render', 'list', '--all').includes('Failed: Certificate expired'));
   const detail = l.call('render', 'detail', 'task-example'); assert.match(detail, /Certificate expired/); assert.match(detail, /Renew the certificate/);
-  l.call('update', 'task-example', '--summary', ''); assert.match(l.call('render', 'list'), /HTTPS certificate expired/);
+  l.call('update', 'task-example', '--summary', ''); assert.match(l.call('render', 'list', '--all'), /HTTPS certificate expired/);
 });
 
 test('summary-only edits preserve current failed checks and work revision', t => {

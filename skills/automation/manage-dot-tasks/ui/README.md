@@ -2,33 +2,29 @@
 
 The durable state machine and acceptance rules are unchanged. CLI view labels retain English by default; select `render ... --language zh` for this workflow. Task notifications default to Chinese. Original task content is not translated.
 
-## Four displayed states
+## Displayed states
 
-| Internal state | Chinese status | English status | Required explanation |
-| --- | --- | --- | --- |
-| queued | 排队中 | Pending | Actual next action when known |
-| blocked | 排队中 | Pending | Explicitly blocked/waiting; full reason and user action, never a claim of running |
-| executing, awaiting_verification | 执行中 | In progress | Current work/checking summary |
-| completed | 成功 | Succeeded | Actual acceptance time and completion result |
-| failed | 失败 | Failed | Actual failure and useful next action |
-| cancelled | 失败 | Failed | Explicitly cancelled and not completed |
+Markdown views and structured card responses distinguish queued, executing, blocked, awaiting verification, completed, failed and cancelled. Labels follow `--language`; task content keeps its original language. Legacy document-only adapters retain the previous four-label projection for compatibility.
 
 Do not show raw `executing` or `awaiting_verification` as a user status. An ended execution does not imply success. Authorized requests whose parsing/creation failed appear in “未创建的请求” with 失败, a request ID, actual failure stage and reason, without a fabricated task.
 
 ## List and detail
 
-`list.md` has a title with the generation timestamp appended on its right in the same line and Title / Status / Summary columns. Completed rows use actual `completion.at`; their inactivity filter stays ten minutes except for scheduling/notification issues. `--all` reveals old completed tasks without deleting anything. Pending, failed and unknown delivery remain in the summary independently of acceptance.
+`list.md` contains a title, one section per status, and task titles with concise progress descriptions. Group boundaries use a horizontal rule and a heading. Default lists select the ten most recently updated active records before grouping. `--all` includes terminal records and removes the limit; `list --status STATE` explicitly queries up to ten recent records of that state. Scheduling and notification issues remain separate from task acceptance.
 
-`task-detail.md` uses the actual task name as its heading, then stable ID, status, concise summary and populated goal/next/steps/checks/results sections. It is not a one-row list. Do not repeat the task title as a body field or create empty sections. Current failed checks and full blockers must remain visible. The original event/check history remains available with `show`.
+`task-detail.md` shows the task name, specific status, summary and populated goal/next/steps/checks/results sections. It omits repeated titles and empty sections. Blockers and failed checks stay visible; the full record and stable ID remain available with `show`.
 
-Placeholders: list uses `$list_title`, `$generated_at`, `$tasks`; detail uses `$title`, `$id`, `$updated_at`, `$status_badge`, `$summary`, `$sections`. Templates control layout only. Existing schema-1 task projections retain their compatible timestamp/byte format; this change affects user views.
+Both templates put a subdued timestamp at the bottom. Completed details use the actual acceptance time, not a later edit time. List time describes this ledger query, not external live execution.
+
+Placeholders: list uses `$list_title`, `$tasks`, `$coverage`, `$footer`; `$generated_at` remains available to custom templates. Detail uses `$title`, `$status_badge`, `$summary`, `$sections`, `$footer`; `$id` and `$updated_at` remain available to custom templates. Templates control layout only. Stored schema-1 projections retain their existing compatible format.
+
 
 ## Time and renderer constraints
 
 User-view timestamps use `Asia/Shanghai` and `YYYY-MM-DD HH:MM:SS` without fractional seconds. The implementation is centralized in `scripts/presentation.mjs`; record storage remains timezone-aware ISO. Generation time, task update time and actual completion time remain distinct.
 
-CommonMark headings and the current native Feishu card title field cannot guarantee a separate, flush-right timestamp. The explicit portable design is `Title · YYYY-MM-DD HH:MM:SS` on the heading line; Markdown uses `<sub>` where supported. Long headings may wrap on a narrow screen. Do not claim actual right alignment, gray color or identical mobile/desktop layout without live evidence.
+Ordinary dot/local replies default to Markdown. A reply through a selected, started Feishu connection uses its native-card route. This choice never starts a service or changes a message destination. Markdown uses headings, whitespace and rules; structured Feishu cards use spaced status groups, gray headings and native dividers. Source, coverage and known timestamps follow the main content. See [response presentations](../references/reply-presentations.md).
 
-List cards use native weighted columns with plain-text cells, avoiding unsupported Markdown tables and active mentions/actions. Single-task cards have the task title, timestamp, stable ID and detail paragraphs, with no list heading or table columns. Text and Markdown transports use safe lines. Result links must be real and audience-accessible. No renderer turns untrusted task/post text into code or additional authorization.
+Legacy document-only adapters retain their earlier table/title-time layout. All card text remains in native plain-text nodes and result links use verified URL buttons. No renderer turns task content into executable actions. Pixel spacing and wrapping depend on the receiving client; local previews and JSON tests do not prove live Feishu rendering.
 
 Failure cards retain the recorded terminal-state reason even when an earlier summary exists, and show a useful next action. Receipt acknowledgements say that the request is queued for review; they do not claim task creation or execution success.

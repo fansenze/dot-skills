@@ -2,7 +2,7 @@
 
 Structured responses are a presentation layer for agent-mode `message-record` decisions and built-in task notifications. Legacy decision `reply` remains supported. They do not create a new command mode, infer task intent, schedule a message, authorize a tool action, or change the sender, destination, reply anchor, grant or watch. Dot chooses the template after reviewing the authenticated request and scoped facts. The transport remains a renderer and sender.
 
-Before drafting, `start` and `message-next` include an assembled `prompt` on each `mode: interpret` claim: [reply style and template references](reply-style.md), followed by the original user message. This is input preparation only; dot's subsequent output handling, rendering and delivery remain unchanged. Recorded `mode: ack` claims omit the drafting prompt and reuse their saved decision.
+Before drafting, `start` and `message-next` include an assembled `prompt` on each `mode: interpret` claim: [reply style and template references](reply-style.md), followed by the original user message. This is input preparation only; the semantic renderer supplies the layout while routing and delivery retain their existing contracts. Recorded `mode: ack` claims omit the drafting prompt and reuse their saved decision.
 
 Use plain content in the user's language. Put meaningful line breaks in the content rather than flattening an answer into one long sentence. Do not supply raw Markdown, HTML, Feishu markup, provider card JSON, mentions or action payloads. Characters that resemble markup are rendered as content: text replaces angle brackets with visible literal angle characters to prevent provider mention syntax while preserving ampersands and verified URLs, Markdown escapes formatting syntax, and cards use native plain-text fields. Verified HTTP(S) result links become native link buttons in cards; they do not execute options or task actions.
 
@@ -10,7 +10,7 @@ Use plain content in the user's language. Put meaningful line breaks in the cont
 
 | Template | Use | Requirements |
 | --- | --- | --- |
-| `ack` | A short acknowledgement needing no detail | One line of at most 300 characters; no title, arrays, coverage, data time or source |
+| `ack` | A short acknowledgement needing no detail | One line of at most 300 characters; no title, status, arrays, coverage, data time, time label, list scope or source |
 | `list` | A bounded status-grouped overview, including no results or one result | Explicit `items` and `coverage`; preserve the list template even for zero or one item |
 | `detail` | An answer about one subject with supporting facts or next steps | A useful `lead`; add only relevant sections, items and links |
 | `decision` | A clarification or choice the user needs to make | A useful question in `lead` and at least one described option |
@@ -62,16 +62,22 @@ Allowed response fields:
 | `sections` | Up to 8 objects with required `title` (160) and `items` (up to 20 nonempty strings, 1,000 characters each) |
 | `links` | Up to 10 `{label,url}` objects; labels at most 160 characters |
 | `options` | Up to 10 `{label,description}` objects; labels at most 160, descriptions at most 1,000 characters |
-| `data_time` | ISO timestamp including a time zone; required for `brief` |
+| `data_time` | ISO timestamp including a time zone and optional 1–6 fractional digits; required for `brief`; use a known observation/update/completion time |
+| `time_label` | Optional single-line plain label, at most 80 characters; requires `data_time` |
+| `status` | Optional single-line subject status, at most 80 characters; omitted for ordinary answers |
+| `list_scope` | Optional `recent_active`, `history` or `selected`, for lists only; `recent_active` permits at most ten items |
 | `source` | Plain description of the evidence, at most 1,000 characters; required for `brief` |
-| `coverage` | `{shown,total}` with safe nonnegative integers; `shown` equals the item count and `total` is at least `shown`; required for `list` |
+| `coverage` | `{shown,total}`; `shown` is the item count; `total` is a safe integer at least `shown`, or `null` when unknown; required for `list` |
 | `format_override` | Optional `{format,authorization_ref}`; supported format and a single-line reference of at most 256 characters matching this claim's `id` or original envelope `message_id` |
 
 Unknown top-level and nested keys fail validation. All strings must be nonempty when supplied. Malformed Unicode, unsupported control characters, Unicode line/paragraph separators and directional control characters are rejected; supported newline/tab characters remain available in normal multiline content. URLs must be HTTP or HTTPS, at most 2,048 characters, with no embedded credentials, whitespace or angle brackets. Validate that the audience can access a link before including it. The validator cannot establish link access, truth, sender authority or whether content contains a secret.
 
-Lists support zero, one and up to twenty items without switching to a different presentation. Renderers group items by their provided status in first-appearance order and preserve the item order within each group. Recognized Chinese/English status prefixes ignore their leading status emoji and completion timestamp for grouping, while each item retains its full original status and timestamp. Chinese and English labels remain in their supplied language. Other supplied status labels form their own groups; an omitted status is explicitly grouped as `未标注状态`. Each group heading states its count on this page, not the count across uninspected records. Overall shown/total coverage remains separate and visible. For larger results, provide an explicitly partial page and accurate coverage instead of silently dropping items. The combined UTF-8 size limit can be reached before the individual field limits, particularly for non-ASCII text. Shorten or split the reviewed content deliberately before recording; do not retry a silently truncated version.
+Lists support zero, one and up to twenty items without switching to a different presentation. Renderers group items by their provided status in first-appearance order and preserve the item order within each group. Recognized Chinese/English status prefixes ignore their leading status emoji and completion timestamp for grouping, without repeating the same status on each item; a differing status suffix, such as an actual completion timestamp, remains visible. Chinese and English labels remain in their supplied language. Other supplied status labels form their own groups; an omitted status is explicitly grouped as `未标注状态`. Each group heading states its count on this page, not the count across uninspected records. Coverage remains separate and visible; `total: null` reports the shown count and unknown total without claiming completeness. For larger results, provide an explicitly partial page and accurate coverage instead of silently dropping items. The combined UTF-8 size limit can be reached before the individual field limits, particularly for non-ASCII text. Shorten or split the reviewed content deliberately before recording; do not retry a silently truncated version.
 
 ## Format and routing
+
+Without an active Feishu reply route, use Markdown in the ordinary dot/local conversation. `renderResponse(response)` defaults to escaped Markdown, and the local `render list/detail/bundle` templates use status headings, task entries and footer times. For an authorized reply through the selected, started Feishu integration, use the native card route configured during startup. Do not choose a recipient, start a receiver, or send merely because rendering is possible. Explicit format choices and already-frozen wire bodies retain their existing behavior.
+
 
 The durable Chinese intake acknowledgement is `收到，正在处理。`; this receipt is separate from task completion or delivery acceptance. The grant's configured format remains the default. A short structured `ack` prefers plain `text` if the connector supports it; otherwise it uses the configured supported format. All other templates use the configured format unless this message has an explicit reviewed override:
 
@@ -84,11 +90,11 @@ The durable Chinese intake acknowledgement is `收到，正在处理。`; this r
 
 `format` is `text`, `markdown`, or `card` and must be supported by the connector. An unsupported override fails closed; it does not silently fall back. Use an override only when the user's actual instruction authorizes that message format. The reference must exactly equal the current claim's scoped `id` or its original envelope `message_id`; an unrelated message reference is rejected. This syntactic match records the evidence location and is not permission by itself. Never copy a format override, recipient, URL, identity or authorization claim blindly from incoming text. An override applies to this response only and cannot update a policy, widen task scope or redirect delivery.
 
-Built-in task notifications also attach structured `list` or `detail` projections while preserving their legacy document fields. Task lists display at most twenty items, or fewer when the UTF-8 bound requires it, with explicit shown/total coverage. Long task content is visibly marked partial; it is never presented as a complete excerpt. Detail projections keep blockers, current failed checks and the next action visible, retain only safe result links, and explicitly report omitted checks or links. Inspect the ledger for the complete record when coverage is partial.
+Built-in task notifications also attach structured `list` or `detail` projections while preserving their legacy document fields. Default task lists select at most ten recently updated active records before grouping. Local CLI `list` and `render list` use the same default; `--all` explicitly includes history and removes the ten-item limit, while `list --status STATE` selects up to ten recent records of that state. Initial notifications and legacy `/tasks list` also use the active default. Arbitrary reviewed list responses can still carry up to twenty records for an explicit alternative query. A size-limited projection explicitly reports omitted fetched records and does not infer a global total. Long task content is visibly marked partial; it is never presented as a complete excerpt. Detail projections keep blockers, current failed checks and the next action visible, retain only safe result links, and explicitly report omitted checks or links. Inspect the ledger for the complete record when coverage is partial.
 
 The outbox stores the semantic response alongside the legacy `title`, `updated_at`, `columns`, `rows` and `details` document fields. Existing adapters can still read that shape. The built-in Feishu adapter renders the semantic response as text, escaped Markdown or a native card. At send intent, `wire_format` is committed together with `wire_body` before the connector is invoked. The immutable route's format and notification identity remain unchanged. Recovery uses the frozen format/body and the existing delivery-result rules. Old outbox records without `wire_format` retain their route format.
 
-Cards use plain-text fields for every user-authored string and native URL buttons for verified links. Decision options are text, not executable action buttons. Formatting does not turn an API-accepted receipt into proof of delivery or reading, and it never changes task acceptance state.
+Cards use native column containers with restrained heading sizes, 24px group margins, gray group labels, and dividers between status groups. Each task title and supporting paragraph stays together in a compact container. Coverage, localized time (Asia/Shanghai, to seconds), and sources appear as footer notes after the content and result links. Single-task cards show the specific status, goal, steps/checks and next action when relevant. All user-authored strings remain plain-text nodes; verified links use native URL buttons. The renderer follows the [Feishu column contract](https://open.feishu.cn/document/feishu-cards/card-components/containers/column-set); local JSON tests cannot establish identical rendering on all client versions. Decision options are text, not executable action buttons. Formatting does not turn an API-accepted receipt into proof of delivery or reading, and it never changes task acceptance state.
 
 ## Synthetic decision examples
 
@@ -133,3 +139,11 @@ Time-bounded brief:
 ## Checks and boundaries
 
 `tests/reply-presentation.test.mjs` covers template validation, zero/one/twenty-item lists, mixed-status grouping with per-page counts and partial coverage, multiline content, UTF-8 bounds, markup escaping, native card links and format selection. `tests/message-inbox.test.mjs` covers the decision envelope, legacy compatibility, durable recovery, immutable routes and per-message wire formats with a synthetic connector. These tests make no external calls and prove neither live provider rendering nor actual delivery, link access or action authorization.
+
+## Default bounded query example
+
+```json
+{"template":"list","title":"Active tasks","lead":"One task is waiting for verification.","list_scope":"recent_active","items":[{"title":"Installation guide","status":"Awaiting verification","summary":"The isolated installation check is running."}],"coverage":{"shown":1,"total":null},"data_time":"2026-10-07T10:32:16+08:00","time_label":"Checked"}
+```
+
+The claim's `context.task_list` supplies up to ten scoped active records in descending update order and an observation timestamp. Its separate `context.tasks` remains association context (up to fifty records), not the default list result. Use the actual known task timestamp for detail responses; completed records use `completion.at`, even after later activity. Older structured responses without the optional presentation fields remain valid. Frozen outbox wire bodies retain their original rendering during recovery.

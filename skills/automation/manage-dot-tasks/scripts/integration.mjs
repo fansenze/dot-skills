@@ -311,7 +311,7 @@ export function createIntegration({store, scheduler, makeTask}) {
         const handshake = allSenders ? null : matchHandshake(data, currentConnection, e, page.events);
         if (handshake) {
           Object.assign(entry, {reason:handshake.reason, ...(handshake.setup_id ? {setup_id:handshake.setup_id,status:'accepted'} : {})});
-          if (handshake.watch && handshake.initial) enqueue(data, 'initial:' + handshake.watch.id, routeFor(currentConnection,handshake.watch), document(store.all().filter(t=>covers(handshake.watch.tasks,t.id)),handshake.watch.language,false));
+          if (handshake.watch && handshake.initial) enqueue(data, 'initial:' + handshake.watch.id, routeFor(currentConnection,handshake.watch), document(store.selected({},t=>covers(handshake.watch.tasks,t.id)),handshake.watch.language,false));
           save(data); return;
         }
         if (!currentConnection.enabled || currentConnection.binding !== snapshot.c.binding) { save(data); return; }
@@ -330,7 +330,7 @@ export function createIntegration({store, scheduler, makeTask}) {
         }
         if (command.task_id && !store.index().some(t => t.id === command.task_id)) { entry.reason = 'unknown-task'; save(data); return; }
         if (['list', 'show'].includes(command.verb)) {
-          const tasks = command.task_id ? [store.get(command.task_id)] : store.all().filter(t => covers(grant.tasks, t.id));
+          const tasks = command.task_id ? [store.get(command.task_id)] : store.selected({},t=>covers(grant.tasks,t.id));
           enqueue(data, 'inbound:' + messageKey, routeFor(currentConnection, grant), document(tasks, grant.language ?? 'zh', command.verb === 'show'), command.task_id, grant.reply_mode === 'reply' ? e.message_id : null, grant.reply_mode === 'reply');
           entry.status = 'accepted'; entry.reason = 'ledger-response'; save(data); return;
         }
@@ -467,7 +467,7 @@ export function createIntegration({store, scheduler, makeTask}) {
         if (!prior && [...data.watches, ...data.grants].some(v => v.id === p.id)) throw new ConnectorError('Policy ID already exists');
         if (prior) prior.enabled = true; else list.push(p);
         if (allSenders) for (const setup of data.handshakes.filter(h => h.connector === c.id && h.account === p.account && h.state === 'pending')) setup.state = 'cancelled';
-        if (cmd === 'watch' && args.initial && !prior) enqueue(data, 'initial:' + p.id, routeFor(c, p), document(store.all().filter(t => covers(p.tasks, t.id)), p.language, false));
+        if (cmd === 'watch' && args.initial && !prior) enqueue(data, 'initial:' + p.id, routeFor(c, p), document(store.selected({},t=>covers(p.tasks,t.id)), p.language, false));
         save(data); return p;
       }
       const n = data.outbox.find(n => n.id === args.id); if (!n) throw new ConnectorError('Unknown notification');
