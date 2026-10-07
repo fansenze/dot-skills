@@ -54,6 +54,8 @@ After starting or reusing a matching instance, check existing destination eviden
 
 Startup does not authorize outgoing test messages or automatic replies. Additional discovery permissions are optional, not a startup requirement; do not expand permissions automatically. See [startup examples](references/operations.md#startup-report-examples) for evidence-based reports.
 
+On a policy denial or execution-tool failure, follow [tool and environment failures](references/operations.md#tool-and-environment-failures). Report whether a new session was actually obtained and service code ran; a supported retry attempt or a new session alone does not establish recovery or reset the platform environment.
+
 ## Receiving and sending
 
 Receive private messages to the bot and group messages that mention this bot. Ignore other group messages. Store message content and type, and deduplicate by message and event IDs. Store non-text content without downloading attachments. Text and post messages also have a bounded, untrusted text projection; see [rich text and thread replies](references/rich-text-and-threads.md) for the official references, content/content_v2 selection, supported wrappers, safety limits and evidence boundaries. See [Operations](references/operations.md) for details.

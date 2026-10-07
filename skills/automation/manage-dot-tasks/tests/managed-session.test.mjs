@@ -51,21 +51,43 @@ test('concurrent second supervisor is blocked without changing receiver state',p
   assert.equal(fs.readFileSync(path.join(f.root,'starts'),'utf8'),'1');
   first.child.kill('SIGTERM');await first.exit;assert.equal(fs.existsSync(path.join(f.root,'alive')),false);
 });
-test('receiver inherited lock survives parent death; after receiver exit same state safely recovers',platformOptions,async t=>{
+for(const interruption of ['EOF','SIGKILL'])test(`${interruption}: released ownership restores the same store and resumes consumption`,platformOptions,async t=>{
   const f=fixture(t),first=await session(t,f);await first.next();
+  const task=async(s,id,args)=>{
+    s.child.stdin.write(JSON.stringify({id,args})+'\n');const r=await s.next();
+    assert.equal(r.id,id);assert.equal(r.ok,true,JSON.stringify(r));return r.result;
+  };
+  await task(first,'init',['init']);
+  const saved=await task(first,'register',['register','--id','task-original','--title','Synthetic recovery task','--goal','Preserve pending work','--status','executing']);
+  await task(first,'schedule',['schedule',saved.id,'--request-id','request-original','--event-id','event-original','--source','fixture','--source-ref','turn-original','--action','execute','--authorization-ref','synthetic-authority','--work-revision',String(saved.work_revision)]);
+  const settings=fs.readFileSync(path.join(f.root,'settings.json'),'utf8');
+  const index=await task(first,'list',['list','--all']);
+  const queue=await task(first,'queue',['queue']);
   const stable=path.join(f.root,'managed-session.flock'),inode=fs.statSync(stable).ino;
   fs.mkdirSync(path.join(f.root,'resident/receipts'),{mode:0o700});fs.writeFileSync(path.join(f.root,'resident/receipts/unknown.json'),'synthetic-unknown');
   fs.writeFileSync(path.join(f.root,'messages.sqlite3'),'synthetic-inbox');
-  first.child.kill('SIGKILL');await first.exit;
-  const blocked=await session(t,f);assert.match((await blocked.next()).reason,/owner-held/);await blocked.exit;
-  assert.equal(fs.existsSync(path.join(f.root,'alive')),true);
-  // The mock receiver stops itself through its fixed fixture-only control file.
-  fs.writeFileSync(path.join(f.root,'stop-receiver'),'stop');await until(()=>!fs.existsSync(path.join(f.root,'alive')));
-  fs.unlinkSync(path.join(f.root,'stop-receiver'));
+  if(interruption==='EOF'){
+    first.child.stdin.end();await first.exit;assert.equal(fs.existsSync(path.join(f.root,'alive')),false);
+  }else{
+    first.child.kill('SIGKILL');await first.exit;
+    const blocked=await session(t,f);assert.match((await blocked.next()).reason,/owner-held/);await blocked.exit;
+    assert.equal(fs.existsSync(path.join(f.root,'alive')),true);
+    assert.equal(fs.readFileSync(path.join(f.root,'starts'),'utf8'),'1');
+    // The mock receiver stops itself through its fixed fixture-only control file.
+    fs.writeFileSync(path.join(f.root,'stop-receiver'),'stop');await until(()=>!fs.existsSync(path.join(f.root,'alive')));
+    fs.unlinkSync(path.join(f.root,'stop-receiver'));
+  }
   const replacement=await session(t,f);assert.equal((await replacement.next()).event,'ready');
   assert.equal(fs.statSync(stable).ino,inode);assert.equal(fs.readFileSync(path.join(f.root,'starts'),'utf8'),'2');
+  assert.equal(fs.readFileSync(path.join(f.root,'settings.json'),'utf8'),settings);
   assert.equal(fs.readFileSync(path.join(f.root,'messages.sqlite3'),'utf8'),'synthetic-inbox');
   assert.equal(fs.readFileSync(path.join(f.root,'resident/receipts/unknown.json'),'utf8'),'synthetic-unknown');
+  assert.deepEqual(await task(replacement,'list',['list','--all']),index);
+  assert.deepEqual(await task(replacement,'show',['show',saved.id]),saved);
+  assert.deepEqual(await task(replacement,'queue',['queue']),queue);
+  const cycle=await task(replacement,'resume',['start','--consumer','fixture-recovery','--timeout-ms','1']);
+  assert.equal(cycle.batch.length,1);assert.equal(cycle.batch[0].id,'request-original');
+  assert.equal(cycle.batch[0].mode,'execute');assert.equal(cycle.batch[0].spec.task_id,saved.id);
   replacement.child.stdin.end();await replacement.exit;
 });
 test('unexpected transient lock shape is preserved and fails closed',platformOptions,async t=>{

@@ -148,9 +148,15 @@ Authentication and message API calls share one HTTP instance with a fixed **30,0
 | `api_error` | Report the numeric API code, HTTP status, and safe request diagnostics when present; follow the official documentation |
 | `delivery_unknown` | Delivery is unconfirmed. Do not automatically resend; an authorized retry preserves the original key, destination, and content |
 | Tool approval pending, rejected, or interrupted | Report the tool's execution/approval state separately. If execution never began, there is no Feishu result; if execution is uncertain, do not infer delivery or automatically rerun |
-| The execution environment rejects an operation | Report the specific action and returned reason, and follow the environment's normal authorization process |
+| The execution environment rejects an operation | Apply the tool/environment failure boundaries below; distinguish a policy denial, failure before service execution, and an uncertain running operation |
 
 The SDK manages listener reconnection. Confirm readiness through `transport_connected` or `transport_reconnected`. Sending does not retry automatically. A successful send requires both API code 0 and a returned message ID; it establishes API acceptance, not that the user read the message.
+
+### Tool and environment failures
+
+An explicit network-policy denial is a blocker even if the old process lock has been released. Do not evade it by changing paths, hosts, proxies, sandbox mode, permissions or network settings. When the user explicitly requests retry, make at most one attempt through the platform's normal supported approval/startup path and report its actual result. If the tool fails before Node executes, no service code ran; when it returned no new session handle, explicitly report that no new session was obtained. A launcher error such as `bwrap: Can't mkdir parents for /root/.codex: Not a directory` is an environment startup failure, not a Feishu API result or a successful restart. Do not loop on identical failures.
+
+Creating a new execution session does not rebuild the platform environment. Without an available supported reset interface, retain the environment blocker; do not modify system directories, mounts or security settings to bypass it, or move a dot-only service elsewhere. For a service owned by Manage Dot Tasks, return to its pinned `references/startup.md` workflow for one same-state replacement after ordinary session loss and released ownership, preserving the stable flock and receipts. Do not apply standalone PID-lock cleanup to that managed service. Successful local commands or synthetic fixtures do not prove live Feishu access; an intent without a result remains uncertain across a failed restart. Do not infer token expiry or a fixed session lifetime from elapsed time or a policy error.
 
 ### Send timeouts and retries
 
