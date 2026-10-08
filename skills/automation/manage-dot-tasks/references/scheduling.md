@@ -16,8 +16,16 @@ For integrated Feishu intake, use the continuous `start` chain described in
 [startup](startup.md#continuous-consumption-and-wake-up-boundaries): collect each
 bounded result, process it, then immediately re-arm. Ten-minute health/recovery
 automations cannot replace this active consumer. A local ledger registration is
-also not a platform task; follow [real platform task mapping](platform-tasks.md)
-when authorized work needs a separately inspectable execution thread.
+also not a platform task; follow [execution location and real task mapping](platform-tasks.md)
+to record verified execution evidence without requiring a new thread for every task.
+
+Default all execution to dot, including research, multi-step work, delegation and
+scheduled work. Use dot's actual tools and execution capabilities. A local
+computer or other supported environment is an exception only when explicitly
+selected by the user; available desktop tools, old local bindings and missing UI
+activity do not authorize that exception. Receiver hosting and task execution
+are separate choices. Scheduled requests use actual platform automations in dot
+by default, not a local fallback or a ledger-only promise of a future invocation.
 
 ## Intake, discovery, and identity
 
@@ -145,13 +153,20 @@ scope instead of stopping after an initial status report:
    the lease is still usable and authorization still applies just before the
    external call. Use the returned request ID as an external idempotency key
    **only if the actual tool supports it**. Never invent unsupported arguments.
-5. Use dot's real supported tools to create, query, or perform the work. Node
-   returns local request IDs, not platform execution IDs. Record the actual
-   returned execution reference and observed state with `record` below. A result
-   may only mean a delegation was accepted or a turn ended; it need not mean the
-   user's task is complete. Continue tracking and acceptance separately.
-6. After the result is durably recorded, verify any [platform task mapping](platform-tasks.md)
-   and `bind` its real thread ID before `ack REQUEST_ID --token TOKEN`. Repeat
+5. Perform the work with dot's actual tools by default. Only an explicitly
+   selected local or other supported environment uses its corresponding task
+   create/read/continue tools; `cloud_threads.create` is not the default entry
+   point for new work. If the selected environment is unavailable, report the
+   blocker without changing locations. An old local mapping does not override
+   a later instruction to use dot: stop further local dispatch and verify
+   in-flight work and receipts before resuming there. Node returns local request
+   IDs, not execution evidence. Record the actual execution reference and
+   observed state with `record` below. A result may only mean a delegation was
+   accepted or a turn ended; continue tracking and acceptance separately.
+6. After the result is durably recorded, verify any [task mapping](platform-tasks.md).
+   For an explicitly selected platform thread, `bind` its real returned thread
+   ID before `ack REQUEST_ID --token TOKEN`. Dot execution needs its actual
+   reference, not a fabricated `threadId` or an extra desktop thread. Repeat
    ack with the same token if its response was lost; it is idempotent. Any
    separately authorized notification comes after persistent result recording
    and needs its own send-result handling. This scheduler sends nothing.
@@ -170,7 +185,9 @@ taskctl ack REQUEST_ID --token TOKEN
 `record` needs a real reference available to dot: for example, a returned task/run
 ID, or the actual current execution reference for work done in this conversation.
 If it cannot be established, leave the request unacknowledged and report the
-missing evidence. Never manufacture one to advance the queue.
+missing evidence. Do not substitute a ledger ID, pretend that a dot execution
+reference is a `threadId`, or create a local task just to obtain an ID. Never
+manufacture evidence to advance the queue.
 
 ## Uncertain effects and recovery
 
