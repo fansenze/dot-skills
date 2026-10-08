@@ -395,7 +395,7 @@ export function createIntegration({store, scheduler, makeTask}) {
           };
         });
         const claimed = await messages.claim({consumer,limit:args.limit ?? 1,lease_ms:args.lease_ms,require_receipt_attempt:true});
-        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: issuesChanged || claimed.messages.length || dotDelivery ? 0 : Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
+        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: issuesChanged || claimed.messages.length || dotDelivery ? 0 : Math.max(0, Math.min(5000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
         if (issuesChanged || dotDelivery || claimed.messages.length || queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
           return {...queued, conversation_issues:conversationIssues, conversation_deliveries:{dot:dotDelivery?[dotDelivery]:[]}, messages:claimed.messages, ingested, notifications, receive_gaps: gaps, readiness: connections.length ? 'configured-bindings; live transport not attested' : 'local-only; no server binding'};
         }

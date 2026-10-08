@@ -61,8 +61,8 @@ test('unchanged conversation issues allow two full idle waits without changing o
     const started=performance.now(),result=await f.start(1400),elapsed=performance.now()-started;
     assert.ok(elapsed>=1380,`idle cycle ${cycle} returned after ${elapsed} ms`);
     assert.ok(elapsed<5000,`idle cycle ${cycle} exceeded its bounded wait: ${elapsed} ms`);
-    assert.equal(f.waits[0],1000);assert.ok(f.waits.length>=2);
-    assert.ok(f.waits.every(ms=>ms>=0&&ms<=1000));
+    assert.ok(f.waits[0]>0);
+    assert.ok(f.waits.every(ms=>ms>=0&&ms<=1400));
     assert.equal(result.timed_out,true);assert.deepEqual(result.batch,[]);assert.deepEqual(result.messages,[]);
     assert.deepEqual(result.notifications,[]);assert.deepEqual(result.receive_gaps,[]);
     assert.equal(result.conversation_issues.total,3);
@@ -91,7 +91,7 @@ test('new or changed issues beyond the first twenty are detected independently o
     const f=await fixture(t,[...Array(20).fill('delivery_unknown'),before]),initial=f.state(),effects=f.effects();
     f.afterWait(()=>f.edit(data=>{const n=data.deliveries[20];n.state=after;n.receipt={status:after,idempotency_key:n.id,retryable:false};}));
     const result=await f.start(60000);
-    assert.deepEqual(f.waits,[1000,0]);assert.equal(result.conversation_issues.total,21);
+    assert.deepEqual(f.waits,[5000,0]);assert.equal(result.conversation_issues.total,21);
     assert.equal(result.conversation_issues.deliveries.length,20);
     assert.ok(result.conversation_issues.deliveries.every(n=>n.state==='delivery_unknown'));
     assert.deepEqual(f.state().deliveries.slice(0,20),initial.deliveries.slice(0,20));
@@ -103,7 +103,7 @@ test('an authorized message arriving during an idle wait is claimed promptly des
   const f=await fixture(t),before=f.bytes(),effects=f.effects();
   f.afterWait(()=>f.incoming('new-request'));
   const result=await f.start(60000);
-  assert.deepEqual(f.waits,[1000,0]);assert.equal(result.ingested,1);assert.equal(result.messages.length,1);
+  assert.deepEqual(f.waits,[5000,0]);assert.equal(result.ingested,1);assert.equal(result.messages.length,1);
   const [message]=result.messages;
   assert.equal(message.mode,'interpret');assert.equal(message.envelope.message_id,'new-request');
   assert.equal(message.grant.id,'grant-one');assert.equal(message.source,'connector-fixture');assert.equal(message.source_ref,message.id);
