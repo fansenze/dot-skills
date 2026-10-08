@@ -97,3 +97,7 @@ For a request limited to validation on dot followed by stopping, complete the lo
 Separate dot exec calls may share files but have different network and PID namespaces. An endpoint file or PID is not proof that another call can reach localhost. Keep receiver and consumer commands in one persistent tool session when required; inspect health from that consumer session. Never kill a PID obtained from another namespace or delete its lock to force recovery. A session supervisor may stop only its own child receiver; reused instances retain their original owner.
 
 `react` uses the same durable intent/result journal as send/reply. Its fingerprint includes the exact incoming message ID, case-sensitive emoji and operation key. It returns a reaction ID, never a bot-message ID. Interrupted/unknown reactions are not automatically retried or replaced with text.
+
+## Upload receipts
+
+The additive `upload` operation journals a file descriptor and separate resource result. `upload-status` only reads that receipt. `send`/`reply` with image/file use the stored app/platform resource ID; payload bytes never cross the 100000-byte local JSON boundary. Preserve the same resident receipt directory during upgrades. See [attachments](attachments.md).

@@ -13,12 +13,12 @@ Ordinary local/dot replies default to Markdown. An explicit connected route sele
 
 The renderer uses Feishu JSON 1.0 components supported by the transport:
 
-- A native header with a colored `text_tag_list` status; no separate status paragraph.
+- A header only for an explicit useful title or a task list. Ordinary answers, canonical conversation replies and completion notifications begin with the lead; optional status follows as a small label. Explicit headings can retain colored `text_tag_list` status.
 - Normal 14px body text, 16px task item titles, and gray 12px `notation` section labels.
 - Compact columns for related content; a single section item is a paragraph. Multiple items retain an existing check/step marker without adding a second bullet.
 - Gray status-group labels, 24px group margins and separating rules preserve clear task-list boundaries.
 - Actual timestamps, source and coverage in a small footer; the display timezone is Beijing time (Asia/Shanghai). Rendering never changes the stored timestamp or acceptance state.
-- Plain-text nodes for authored content and native URL buttons for reviewed HTTP(S) links. Choices remain text and do not execute actions.
+- Plain-text nodes for authored content and native `lark_md` text hyperlinks for reviewed HTTP(S) links. Link labels are escaped and URL delimiters encoded; ordinary sources/results never become buttons. Choices remain text and do not execute actions.
 
 Official contracts: [plain text and sizes](https://open.feishu.cn/document/feishu-cards/card-components/content-components/plain-text), [columns and spacing](https://open.feishu.cn/document/feishu-cards/card-components/containers/column-set), and [header status tags](https://open.feishu.cn/document/feishu-cards/card-components/content-components/title).
 

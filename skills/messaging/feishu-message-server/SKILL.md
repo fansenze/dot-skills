@@ -1,6 +1,6 @@
 ---
 name: feishu-message-server
-description: Configure and start a Node.js Feishu message server on the user's selected service host. Use direct execution on dot with a dot-local configuration, or remote-config-bridge for explicitly requested computer hosting. Receive private messages and group mentions; send or reply with text, Markdown, or cards and add message reactions when requested. Use for setup, startup, inbox inspection, messaging, troubleshooting, and migration.
+description: Configure and start a Node.js Feishu message server on the user's selected service host. Use direct execution on dot with a dot-local configuration, or remote-config-bridge for explicitly requested computer hosting. Receive private messages and group mentions; send or reply with text, Markdown, cards, images or PDFs and add message reactions when requested. Use for setup, startup, inbox inspection, messaging, troubleshooting, and migration.
 ---
 
 # Feishu Message Server
@@ -93,6 +93,10 @@ Keep confirmed mappings and their evidence in the conversation and existing priv
 Preserve the CLI's safe `error_type`, allowlisted `error_code`, `request_phase`, and per-request `elapsed_ms` when present. Never expose raw exceptions, request/response dumps, credentials, headers, or message bodies as diagnostics. If a tool approval is pending, rejected, or interrupted before execution, report that tool state separately from Feishu results. An interrupted tool result without execution evidence cannot establish an API timeout or delivery outcome.
 
 Sending never retries automatically. The resident durably records dispatch intent and terminal/unknown results before reporting them; a repeated key replays its stored result and a key with changed content is rejected. In-flight, interrupted, or unknown outcomes are not redispatched automatically. Preserve the resident operation journal through restarts. For an authorized retry of the same operation, preserve the exact destination and ID type, text, reply options, and returned `idempotency_key`. A change to the text or destination is a new message and needs a new key; do not add a timestamp or otherwise alter content during a retry. If the original key is unavailable after an uncertain attempt, report the duplicate risk and clarify before resending.
+
+### Image and PDF attachments
+
+Read [attachment uploads and receipts](references/attachments.md) before sending an authorized image or PDF. Use `inspect-upload` and `upload` for a selected host-local file within the authorized root, then `send`/`reply --format image|file --resource-id UPLOAD_KEY` with a separate stable message key. Keep both durable receipts, including digest, app/platform and actual message ID. `upload-status` is read-only recovery; an unknown upload or send never authorizes a fresh attempt. These operations require the selected matching resident and never start it.
 
 ### Explicit message reactions
 

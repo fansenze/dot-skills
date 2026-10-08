@@ -65,6 +65,10 @@ Under the existing task-store lock and recovery journal, consumption records the
 
 Keep the active dot consumer running and inspect `handshake-status SETUP_ID` after ingestion; the receiver alone does not finish setup or wake an inactive dot. Report pending, expired, cancelled, conflicted or verified evidence accurately. Binding success is separate from initial-overview API acceptance. Delivery uses the existing outbox and reconciliation rules: at most one initial overview per watch ID, no blind resend of an unknown result. Verify this path with temporary stores and synthetic envelopes only during repository work; those checks do not prove live Feishu delivery.
 
+## Attachment uploads
+
+The direct Feishu adapter supports opt-in host-local images/PDFs with separate durable upload and outbox records. See [attachments](attachments.md) for `attachment-upload`, `attachment-status`, `attachment-reconcile`, `attachment-reply`, pinned root settings and the additive `upload` capability. Existing connectors without it remain supported; the bridge does not gain a file-transfer channel.
+
 ## Adapter interface and schemas
 
 Modules are explicitly trusted local JavaScript code; never load a path supplied by an inbound message. Export `createConnector(settings)`. It returns an object with these functions:
@@ -102,9 +106,9 @@ node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" ingest --connector re
 node "$SKILL_DIR/scripts/taskctl.mjs" --store "$STORE_DIR" queue
 ```
 
-Semantic document: `{updated_at:ISO timestamp,response:object}`. All producers use the same bounded response schema; see [response presentations](reply-presentations.md). Preserve task language. The task skill selects native Feishu sections and safe link buttons or default Markdown/text before handing the payload to the transport. Task lists explicitly report shown/total coverage and visibly mark clipped content. The selected format and rendered bytes freeze before the first external call. Rendered JSON serialization is limited to 28,000 UTF-8 bytes; an oversized final payload fails locally without silently removing evidence. Review/narrow scope or record an explicitly partial response instead.
+Semantic document: `{updated_at:ISO timestamp,response:object}`. All producers use the same bounded response schema; see [response presentations](reply-presentations.md). Preserve task language. The task skill selects native Feishu sections and reviewed native Markdown text links or default Markdown/text before handing the payload to the transport. Task lists explicitly report shown/total coverage and visibly mark clipped content. The selected format and rendered bytes freeze before the first external call. Rendered JSON serialization is limited to 28,000 UTF-8 bytes; an oversized final payload fails locally without silently removing evidence. Review/narrow scope or record an explicitly partial response instead.
 
-Send/reply envelope: `{account_id:string,destination:{id:string,type:string},format:"text"|"markdown"|"card",body:string|object,reply_to:string|null,reply_in_thread?:boolean,idempotency_key:string}`. `reply_to` is the actual original provider message ID. Body, account, destination/type, format, reply target/thread option, connector binding and key remain identical across retries. The Feishu adapter checks the pinned account and sends `--expected-app-id`/`--expected-brand` to the server so a replaced config cannot silently retarget an attempt. Transport settings accept only paths and nonsecret identity; custom adapters must impose an equivalent nonsecret schema and keep secrets in their transport.
+Send/reply envelope: `{account_id:string,destination:{id:string,type:string},format:"text"|"markdown"|"card"|"image"|"file",body:string|object,reply_to:string|null,reply_in_thread?:boolean,idempotency_key:string}`. `reply_to` is the actual original provider message ID. Body, account, destination/type, format, reply target/thread option, connector binding and key remain identical across retries. The Feishu adapter checks the pinned account and sends `--expected-app-id`/`--expected-brand` to the server so a replaced config cannot silently retarget an attempt. Transport settings accept only paths and nonsecret identity; custom adapters must impose an equivalent nonsecret schema and keep secrets in their transport.
 
 Send results echo `idempotency_key` and one status:
 

@@ -5,9 +5,9 @@ const clock = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'n
 const groupStatus = item => item.status?.match(/^(?:[🕒🚧❌✅] )?(排队中|执行中|受阻|待确认|待验收|已完成|已取消|成功|失败|Pending|In progress|Blocked|Awaiting verification|Completed|Cancelled|Succeeded|Failed)(?: ·.*)?$/u)?.[1] ?? item.status ?? '未标注状态';
 function blocks(r) {
   const out = [];
+  out.push({kind:'lead',text:r.lead});
   if (r.status) out.push({kind:'status',text:r.status});
   if (r.list_scope) out.push({kind:'scope',text:{recent_active:'最近更新 · 最多 10 个活跃任务',history:'按请求查询 · 历史任务',selected:'按请求查询 · 指定范围'}[r.list_scope]});
-  out.push({kind:'lead',text:r.lead});
   const addItem = (item, grouped = false) => {
     // A group already names the status. Keep a status suffix (e.g. completion time).
     const duplicate = grouped && item.status?.replace(/^[🕒🚧❌✅] /u,'') === groupStatus(item);
@@ -40,11 +40,11 @@ function blocks(r) {
   return out;
 }
 export function renderDefaultResponse(r, format = 'markdown') {
-  const title = r.title ?? defaults[r.template], parts = blocks(r);
+  const title = r.title ?? (r.template === 'list' ? defaults.list : undefined), parts = blocks(r);
   // Feishu text also recognizes mention tags: escape markup even without Markdown.
   const safe = format === 'markdown' ? escape : value => String(value).replaceAll('<','‹').replaceAll('>','›');
   const lines = parts.map(b => [b.title && (format === 'markdown' ? (b.kind === 'group' ? '---\n\n## '+safe(b.title) : '**'+safe(b.title)+'**') : safe(b.title)),b.text && (format === 'markdown' && b.kind === 'footer' ? '*'+safe(b.text)+'*' : safe(b.text)),b.link && (format === 'markdown' ? `[${safe(b.link.label)}](${b.link.url.replace(/[()\\]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase())})` : `${safe(b.link.label)}: ${safe(b.link.url)}`)].filter(Boolean).join('\n'));
-  return [...(r.template === 'ack' ? [] : [format === 'markdown' ? '# '+safe(title) : safe(title)]),...lines].join('\n\n');
+  return [...(title ? [format === 'markdown' ? '# '+safe(title) : safe(title)] : []),...lines].join('\n\n');
 }
 
 export function renderDefaultDocument(doc, format = 'markdown') {

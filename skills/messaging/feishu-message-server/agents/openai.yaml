@@ -1,4 +1,4 @@
 interface:
   display_name: "Feishu Message Server"
-  short_description: "Resident Feishu intake, replies, and message reactions"
+  short_description: "Resident Feishu replies, image/PDF uploads and reactions"
   default_prompt: "Use $feishu-message-server on my selected service host and reuse its matching local resident service. Startup needs no user binding or test message; Manage Dot Tasks open intake records the source of each real request and processes every sender. For dot hosting, transfer my selected computer-local configuration through the internal Library skill, verify its bytes on dot, and use that local copy. Use $remote-config-bridge only if I explicitly choose computer hosting."

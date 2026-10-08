@@ -9,21 +9,24 @@ const plain = (content, size = 'normal', color = 'default') => ({tag:'div',text:
 const column = (elements, margin = '0px', background = 'default', padding = '0px') => ({tag:'column_set',flex_mode:'none',background_style:background,margin,
   columns:[{tag:'column',width:'weighted',weight:1,padding,vertical_spacing:'4px',elements}]});
 const label = content => plain(content,'notation','grey');
-const button = link => ({tag:'button',text:{tag:'plain_text',content:link.label},type:'default',url:link.url});
+// Only reviewed links enter Markdown; authored prose remains plain text.
+const linkText = link => ({tag:'div',text:{tag:'lark_md',content:`[${link.label.replace(/[\r\n\t]/g,' ').replaceAll('<','‹').replaceAll('>','›').replace(/([\\`*_{}\[\]()#!|~])/g,'\\$1')}](${link.url.replace(/[()\\`\[\]"]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase())})`}});
 
 export function renderFeishuResponse(value) {
   const r = validateResponse(value), elements = [];
   // Supported native header tags keep status with the title, without an extra row.
-  const header = {title:{tag:'plain_text',content:r.title ?? titles[r.template]},template:'default',
-    ...(r.status ? {text_tag_list:[{tag:'text_tag',text:{tag:'plain_text',content:r.status},color:statusColor(r.status)}]} : {})};
+  const heading = r.title ?? (r.template === 'list' ? titles.list : undefined);
+  const header = heading ? {title:{tag:'plain_text',content:heading},template:'default',
+    ...(r.status ? {text_tag_list:[{tag:'text_tag',text:{tag:'plain_text',content:r.status},color:statusColor(r.status)}]} : {})} : undefined;
   elements.push(plain(r.lead));
+  if (!header && r.status) elements.push(label(r.status));
   if (r.list_scope) elements.push(label({recent_active:'最近更新的活跃任务 · 最多 10 个',history:'历史任务',selected:'指定范围内的任务'}[r.list_scope]));
   const item = (row, grouped = false) => {
     const duplicate = grouped && row.status && row.status.replace(/^[🕒🚧❌✅] /u,'') === statusLabel(row.status);
     const status = row.status && !duplicate ? row.status : null;
     const info = [status,row.summary,row.blocker && '受阻：'+row.blocker,row.next_action && '下一步：'+row.next_action].filter(Boolean);
     elements.push(column([plain(row.title,'heading'),...info.map(text=>plain(text))],'8px 0px 8px 0px','default','0px 8px 0px 8px'));
-    if (row.url) elements.push({tag:'action',actions:[button({label:row.title,url:row.url})]});
+    if (row.url) elements.push(linkText({label:row.title,url:row.url}));
   };
   if (r.template === 'list') {
     const groups = new Map();
@@ -40,8 +43,7 @@ export function renderFeishuResponse(value) {
     elements.push(column([label(section.title),...rows],'8px 0px 0px 0px'));
   }
   for (const [index, option] of (r.options ?? []).entries()) elements.push(column([plain(`${String(index+1).padStart(2,'0')}. ${option.label}`),plain(option.description)],'8px 0px 0px 0px'));
-  // One action row per link avoids the provider's maximum actions-per-row limit.
-  for (const link of r.links ?? []) elements.push({tag:'action',actions:[button(link)]});
+  for (const link of r.links ?? []) elements.push(linkText(link));
   const footer = [];
   if (r.coverage) {
     const {shown,total} = r.coverage;
@@ -50,7 +52,7 @@ export function renderFeishuResponse(value) {
   if (r.data_time) footer.push(`${r.time_label ?? (r.template === 'brief' ? '截至' : '数据时间')}：${clock.format(new Date(r.data_time))} · 北京时间`);
   if (r.source) footer.push('来源：'+r.source);
   if (footer.length) elements.push({tag:'hr'},column(footer.map(label)));
-  return {config:{wide_screen_mode:true},header,elements};
+  return {config:{wide_screen_mode:true},...(header ? {header} : {}),elements};
 }
 
 export function renderFeishuDocument(doc, format = 'card') {

@@ -97,6 +97,10 @@ When supported task-query tools are available, the invoking assistant reads the 
 
 `observe` does not complete a task. `check` records a check already performed; `doctor` / `verify` check local integrity only. Material changes invalidate prior acceptance checks. Reopening completed work requires a reason and fresh verification.
 
+## Image and PDF replies
+
+For a requested attachment, follow [authorized attachment replies](references/attachments.md). The direct Feishu adapter must have reviewed `attachment_roots` on its service host. Use `attachment-upload` to persist the digest and app/platform resource receipt, then `attachment-reply` with the original scoped inbox ID to queue its threaded response. Inspect the normal outbox for the actual message ID; upload success is not message delivery or task completion. Preserve upload and message identities through recovery. Remote Config Bridge does not carry file bytes.
+
 ## Views and boundaries
 
 [ui/list.md](ui/list.md) and [ui/task-detail.md](ui/task-detail.md) are independent Markdown templates. See [ui/README.md](ui/README.md) for placeholders. Default to Markdown in ordinary dot/local conversations when no Feishu reply route is active. For a reply through the selected, started Feishu integration, use its native-card route. Installing the skill or having an unused connector does not change the current reply channel. Preserve an explicit user format choice and existing frozen delivery records; do not start a connector merely to render a reply.

@@ -6,10 +6,11 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, DEFAULT_STATE, SafeError, ConfigError, loadConfig, initialize, checkConfig, prepareConfig } from './config.mjs';
 import { readInbox, readInboxPage } from './messages.mjs';
-import { createNetwork, createClient, sendMessage, addReaction, getHttpDiagnostics } from './transport.mjs';
+import { createNetwork, createClient, sendMessage, addReaction, uploadResource, getHttpDiagnostics } from './transport.mjs';
+import {describeUpload} from './resources.mjs';
 import { CAPABILITIES } from './formats.mjs';
 import { startListener, createLog } from './runtime.mjs';
-import { startResident, residentRequest, runtimeIdentity } from './resident.mjs';
+import { startResident, residentRequest, runtimeIdentity, uploadReceipt } from './resident.mjs';
 import { randomUUID } from 'node:crypto';
 
 export const HELP = `Feishu Message Server — Node.js 22.18+ (transport only)
@@ -27,6 +28,9 @@ Usage: bash feishu.sh <command> [options]
   send --receive-id ID --text TEXT [--receive-id-type chat_id]
   reply --message-id ID --text TEXT [--reply-in-thread]
   react --message-id ID --emoji-type Get  Add an explicitly requested reaction
+  inspect-upload --path FILE --allowed-root DIR --kind image|file  Inspect authorized bytes locally
+  upload --path FILE --allowed-root DIR --kind image|file --idempotency-key KEY
+  upload-status --resource-id KEY  Read durable upload receipt; no upload retry
   test | validate | package     Offline tests, skill check, safe portable archive
 Options: --config FILE --brand feishu|lark --state-dir DIR
 Resident: --resident-dir DIR (trusted local service; no separate access token)
@@ -34,6 +38,9 @@ Resident: --resident-dir DIR (trusted local service; no separate access token)
 --isolated start requires explicit separate resident-dir and state-dir.
 Send/reply text: exactly one of --text, --text-file FILE, --stdin
 Optional --format text|markdown|card (card input is JSON); no implicit format fallback.
+Attachments: --format image|file --resource-id UPLOAD_KEY replaces text input; resident only.
+Uploads support images up to 10 MiB and PDF files up to 30 MiB. No base64 payloads.
+Upload and message keys must differ. Preserve both receipts across restarts.
 Optional --idempotency-key KEY for manual retry of the same operation.
 Authentication and message HTTP requests each time out after 30 seconds; no automatic send retry.
 Retry only when authorized with the same destination, text and key. Changed text needs a new key.
@@ -42,7 +49,8 @@ Receive private messages and group messages that @this bot. No automatic reply o
 `;
 
 const shared = {'resident-dir': {type: 'string'}, standalone: {type: 'boolean'}, isolated: {type: 'boolean'}, config: {type: 'string'}, brand: {type: 'string'}, 'state-dir': {type: 'string'}, help: {type: 'boolean'}};
-const outgoing = {text: {type: 'string'}, 'text-file': {type: 'string'}, stdin: {type: 'boolean'}, 'idempotency-key': {type: 'string'}, format: {type: 'string'}, 'expected-app-id': {type: 'string'}, 'expected-brand': {type: 'string'}};
+const outgoing = {text: {type: 'string'}, 'text-file': {type: 'string'}, stdin: {type: 'boolean'}, 'resource-id':{type:'string'}, 'idempotency-key': {type: 'string'}, format: {type: 'string'}, 'expected-app-id': {type: 'string'}, 'expected-brand': {type: 'string'}};
+const uploadOptions = {path:{type:'string'},'allowed-root':{type:'string'},kind:{type:'string'},sha256:{type:'string'}};
 const options = {
   init: {...shared, 'stdin-json': {type: 'boolean'}},
   prepare: {...shared, 'stdin-json': {type: 'boolean'}}, check: shared, start: shared, health: shared,
@@ -50,7 +58,10 @@ const options = {
   'inbox-page': {...shared, cursor: {type: 'string'}, limit: {type: 'string'}, 'show-text': {type: 'boolean'}}, capabilities: shared, identity: shared,
   send: {...shared, ...outgoing, 'receive-id': {type: 'string'}, 'receive-id-type': {type: 'string'}},
   react: {...shared, 'message-id':{type:'string'}, 'emoji-type':{type:'string'}, 'idempotency-key':{type:'string'}, 'expected-app-id':{type:'string'}, 'expected-brand':{type:'string'}},
-  reply: {...shared, ...outgoing, 'message-id': {type: 'string'}, 'reply-in-thread': {type: 'boolean'}}
+  reply: {...shared, ...outgoing, 'message-id': {type: 'string'}, 'reply-in-thread': {type: 'boolean'}},
+  'inspect-upload':uploadOptions,
+  upload:{...shared,...uploadOptions,'idempotency-key':{type:'string'},'expected-app-id':{type:'string'},'expected-brand':{type:'string'}},
+  'upload-status':{...shared,'resource-id':{type:'string'},'expected-app-id':{type:'string'},'expected-brand':{type:'string'}}
 };
 
 async function readStdin(maxBytes) {
@@ -78,6 +89,16 @@ async function promptCredentials() {
   } finally { muted = false; rl.close(); }
 }
 
+export async function sendResidentMessage(client,args,residentDir,identity) {
+  if (['image','file'].includes(args.format)) {
+    let uploaded;
+    try { uploaded = uploadReceipt(residentDir,args.resourceId,identity); } catch { /* fail before any message API */ }
+    if (!uploaded?.ok || uploaded.resource?.kind!==args.format || args.body!==undefined) return {ok:false,status:'not_sent',idempotency_key:args.idempotencyKey,error_code:'resource-not-ready'};
+    args={...args,body:{[args.format+'_key']:uploaded.resource[args.format+'_key']}};
+  } else if (args.resourceId!==undefined) throw new SafeError('resource-format-mismatch');
+  return sendMessage(client,args);
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (!command || ['help', '--help', '-h'].includes(command)) { process.stdout.write(HELP); return 0; }
@@ -88,6 +109,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (v.help) { process.stdout.write(HELP); return 0; }
   const configFile = path.resolve(v.config ?? DEFAULT_CONFIG), stateDir = path.resolve(v['state-dir'] ?? DEFAULT_STATE);
   const print = value => process.stdout.write(JSON.stringify(value) + '\n');
+  if (command === 'inspect-upload') { print(describeUpload({filePath:v.path,allowedRoot:v['allowed-root'],kind:v.kind,sha256:v.sha256})); return 0; }
   const residentDir = path.resolve(v['resident-dir'] ?? path.join(stateDir, 'resident'));
   if (v.isolated && (command !== 'start' || !v['resident-dir'] || !v['state-dir'])) throw new SafeError('isolated requires start with explicit resident-dir and state-dir');
   if (v.standalone && (v['resident-dir'] || v.isolated)) throw new SafeError('standalone cannot be mixed with resident options');
@@ -162,8 +184,9 @@ export async function main(argv = process.argv.slice(2)) {
           if (operation === 'inbox-page') return readInboxPage(path.join(stateDir, 'messages.sqlite3'), args);
           if (operation === 'inbox') return {messages: readInbox(path.join(stateDir, 'messages.sqlite3'), args.limit ?? 20, Boolean(args.showText))};
           if (operation === 'react') return addReaction(client,args);
+          if (operation === 'upload') return uploadResource(client,args,identity);
           if ((operation === 'reply') !== (args.messageId !== undefined)) throw new SafeError('operation-target-mismatch');
-          return sendMessage(client, args);
+          return sendResidentMessage(client,args,residentDir,identity);
         }});
       const log = createLog(stateDir);
       await startListener(config, {stateDir, signal: controller.signal,
@@ -180,9 +203,20 @@ export async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   let outgoingArgs;
-  if (command === 'react') {
+  if (['upload','upload-status'].includes(command)) {
+    if (v.standalone) throw new SafeError('Attachment operations require the durable resident service');
+    if (command === 'upload') {
+      if (!v['idempotency-key']) throw new SafeError('Uploads require an explicit stable idempotency-key');
+      outgoingArgs = {descriptor:describeUpload({filePath:v.path,allowedRoot:v['allowed-root'],kind:v.kind,sha256:v.sha256}),idempotencyKey:v['idempotency-key']};
+    } else outgoingArgs = {resourceId:v['resource-id']};
+  } else if (command === 'react') {
     if (!v['message-id'] || !v['emoji-type']) throw new SafeError('react requires message-id and emoji-type');
     outgoingArgs={messageId:v['message-id'],emojiType:v['emoji-type'],idempotencyKey:v['idempotency-key'] ?? randomUUID()};
+  } else if (['image','file'].includes(v.format) || v['resource-id'] !== undefined) {
+    if (v.standalone || !['image','file'].includes(v.format) || !v['resource-id'] || v.text !== undefined || v['text-file'] !== undefined || v.stdin) throw new SafeError('Attachments require image|file, resource-id and resident mode without text input');
+    if (!v['idempotency-key'] || v['idempotency-key']===v['resource-id']) throw new SafeError('Attachment messages require a stable idempotency-key distinct from the upload key');
+    if (command === 'reply' && !v['message-id']) throw new SafeError('message-id is required for reply');
+    outgoingArgs = {format:v.format,resourceId:v['resource-id'],idempotencyKey:v['idempotency-key']??randomUUID(),receiveId:v['receive-id'],receiveIdType:v['receive-id-type'],messageId:v['message-id'],replyInThread:Boolean(v['reply-in-thread'])};
   } else {
     if ([v.text !== undefined, v['text-file'] !== undefined, Boolean(v.stdin)].filter(Boolean).length !== 1) {
       throw new SafeError('Provide exactly one of --text, --text-file or --stdin');
@@ -206,7 +240,8 @@ export async function main(argv = process.argv.slice(2)) {
       const result = await residentRequest({directory: residentDir, identity: {app_id: config.app_id, brand: config.brand, runtime: runtimeIdentity()}, operation: command, args: outgoingArgs});
       print(result); return result.ok ? 0 : 1;
     } catch (error) {
-      print({ok: false, status: ['resident-unavailable-no-fallback','resident-binding-mismatch','unsafe-local-permissions','resident-request-rejected','resident-binding-or-operation-mismatch','invalid-arguments','idempotency-key-required','idempotency-conflict'].includes(error.code) ? 'not_sent' : 'delivery_unknown',
+      const noCall = ['resident-unavailable-no-fallback','resident-binding-mismatch','unsafe-local-permissions','resident-request-rejected','resident-binding-or-operation-mismatch','invalid-arguments','idempotency-key-required','idempotency-conflict'].includes(error.code);
+      print({ok: false, status: command.startsWith('upload') ? (noCall?'not_uploaded':'upload_unknown') : noCall ? 'not_sent' : 'delivery_unknown',
         idempotency_key: outgoingArgs.idempotencyKey, error_code: error instanceof SafeError ? error.message : 'resident-request-failed'}); return 1;
     }
   }

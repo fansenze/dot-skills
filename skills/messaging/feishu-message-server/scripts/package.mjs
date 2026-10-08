@@ -8,6 +8,7 @@ import { parse, stringify } from 'yaml';
 import { findProject } from './project.mjs';
 
 export const FILES = Object.freeze([
+  'scripts/resources.mjs', 'tests/resources.test.mjs', 'references/attachments.md',
   'SKILL.md', 'agents/openai.yaml', 'config.example.yml', 'feishu.sh',
   'package.json', 'scripts/project.mjs', 'scripts/config.mjs', 'scripts/messages.mjs', 'scripts/content.mjs',
   'tests/resident.test.mjs', 'tests/fixtures/resident-process.mjs', 'scripts/resident.mjs', 'references/resident.md', 'scripts/transport.mjs', 'scripts/runtime.mjs', 'scripts/server.mjs', 'scripts/formats.mjs',

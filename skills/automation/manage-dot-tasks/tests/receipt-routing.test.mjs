@@ -115,7 +115,7 @@ test('direct and bridge Feishu channels use one renderer; completion notices omi
   for(const name of ['feishu-message-server','remote-config-bridge']) {
     const result=renderConnectorDocument({name,presentation:'feishu'},'card',notification);
     assert.deepEqual(result,renderResponse(notification.response,'card'));
-    assert.equal(result.header.text_tag_list[0].color,'green');
+    assert.equal(result.header,undefined);assert.equal(result.elements[1].text.content,'已完成');
   }
   const response={template:'detail',lead:'Done',sections:[{title:'Verified',items:['✓ A check']},{title:'Next',items:['A next step']}]};
   const card=renderResponse(response,'card');assert.doesNotMatch(JSON.stringify(card),/• ✓|heading/);

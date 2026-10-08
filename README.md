@@ -65,7 +65,7 @@ CLI requirements: Node.js 22.18+. Feishu additionally needs pnpm 11.27.0 and its
 
 | Category | Skill | Use it to |
 | --- | --- | --- |
-| Messaging | [Feishu Message Server](skills/messaging/feishu-message-server/SKILL.md) | Receive private messages and group mentions; send or reply with explicit text, Markdown, or cards. |
+| Messaging | [Feishu Message Server](skills/messaging/feishu-message-server/SKILL.md) | Receive private messages and group mentions; send or reply with explicit text, Markdown, cards, images or PDFs. |
 | Messaging | [Remote Config Bridge](skills/messaging/remote-config-bridge/SKILL.md) | Bridge authorized operations when the user selects a connected computer to host Feishu; keep its credentials and transport there. |
 | Automation | [Manage Dot Tasks](skills/automation/manage-dot-tasks/SKILL.md) | Manage tasks, scheduling, authorized notifications/natural-language intake, and acceptance through one CLI and Markdown UI. |
 | Files | [Transfer Local Files to dot](skills/files/transfer-local-files-to-dot/SKILL.md) | Copy selected local files through ChatGPT Library and verify exact bytes on dot. |

@@ -7,7 +7,7 @@ import { findProject } from './project.mjs';
 import { fileURLToPath } from 'node:url';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
-const allowed = new Set(['health', 'identity', 'capabilities', 'inbox', 'inbox-page', 'send', 'reply', 'react']);
+const allowed = new Set(['health', 'identity', 'capabilities', 'inbox', 'inbox-page', 'send', 'reply', 'react', 'upload', 'upload-status']);
 const fail = code => Object.assign(new SafeError(code), {code});
 export function privatePath(filename, directory = false) {
   const st = fs.lstatSync(filename);
@@ -33,6 +33,14 @@ export function runtimeIdentity() {
   return hash(fs.readFileSync(project.lockfile) + '\0' + fs.readFileSync(path.join(directory, '../package.json')) + '\0' + fs.readdirSync(directory).filter(n => n.endsWith('.mjs')).sort().map(n => n + '\0' + fs.readFileSync(path.join(directory, n))).join('\0'));
 }
 function same(a, b) { return a && b && a.app_id === b.app_id && a.brand === b.brand && a.runtime === b.runtime; }
+export function uploadReceipt(directory, key, identity) {
+  if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,50}$/.test(key)) throw fail('invalid-resource-id');
+  let record;
+  try { record = JSON.parse(readPrivate(path.join(directory,'receipts',hash(key)+'.json'))); }
+  catch { throw fail('resource-receipt-unavailable'); }
+  if (record.operation !== 'upload' || record.identity?.app_id !== identity.app_id || record.identity?.brand !== identity.brand) throw fail('resource-binding-mismatch');
+  return record.result ?? {ok:false,status:'upload_unknown',idempotency_key:key,error_code:'resident-interrupted-no-retry'};
+}
 export async function residentRequest({directory, identity, operation, args = {}, timeout = 65000}) {
   let endpoint;
   try { endpoint = JSON.parse(readPrivate(path.join(directory, 'endpoint.json'))); }
@@ -72,11 +80,17 @@ export async function startResident({directory, identity, handler, signal}) {
     if (!value || !allowed.has(value.operation) || !same(value.identity, identity) || value.instance !== instance) throw fail('resident-binding-or-operation-mismatch');
     const args = value.args;
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw fail('invalid-arguments');
-    if (!['send','reply','react'].includes(value.operation)) return handler(value.operation, args);
+    if (value.operation === 'upload-status') return uploadReceipt(directory,args.resourceId,identity);
+    if (!['send','reply','react','upload'].includes(value.operation)) return handler(value.operation, args);
     const key = args.idempotencyKey;
     if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,50}$/.test(key)) throw fail('idempotency-key-required');
     const receipt = path.join(receipts, `${hash(key)}.json`);
-    const fingerprint = hash(JSON.stringify({operation: value.operation, args, identity}));
+    const upload = value.operation === 'upload';
+    const unknown = upload ? 'upload_unknown' : 'delivery_unknown';
+    const owner = {app_id:identity.app_id,brand:identity.brand};
+    const metadata = upload ? {operation:'upload',identity:owner,descriptor:args.descriptor} : ['image','file'].includes(args.format)
+      ? {operation:value.operation,identity:owner,resource_id:args.resourceId,format:args.format,target:{receive_id:args.receiveId,receive_id_type:args.receiveIdType,message_id:args.messageId,reply_in_thread:args.replyInThread}} : {};
+    const fingerprint = hash(JSON.stringify({operation: value.operation, args, identity:upload ? metadata.identity : identity}));
     if (pending.has(key)) {
       const prior = pending.get(key); if (prior.fingerprint !== fingerprint) throw fail('idempotency-conflict');
       return prior.promise;
@@ -84,16 +98,16 @@ export async function startResident({directory, identity, handler, signal}) {
     if (fs.existsSync(receipt)) {
       const record = JSON.parse(readPrivate(receipt));
       if (record.fingerprint !== fingerprint) throw fail('idempotency-conflict');
-      return record.result ?? {ok: false, status: 'delivery_unknown', idempotency_key: key, error_code: 'resident-interrupted-no-retry'};
+      return record.result ?? {ok: false, status: unknown, idempotency_key: key, error_code: 'resident-interrupted-no-retry'};
     }
     // Durable intent before any provider call. A crash remains unknown, never retried.
-    atomic(receipt, {fingerprint});
+    atomic(receipt, {fingerprint,...metadata});
     const promise = (async () => {
       let result;
       try { result = await handler(value.operation, args); }
-      catch { result = {ok: false, status: 'delivery_unknown', idempotency_key: key, error_code: 'resident-handler-unknown'}; }
-      try { atomic(receipt, {fingerprint, result}); }
-      catch { return {ok: false, status: 'delivery_unknown', idempotency_key: key, error_code: 'resident-receipt-write-failed'}; }
+      catch { result = {ok: false, status: unknown, idempotency_key: key, error_code: 'resident-handler-unknown'}; }
+      try { atomic(receipt, {fingerprint,...metadata,result}); }
+      catch { return {ok: false, status: unknown, idempotency_key: key, error_code: 'resident-receipt-write-failed'}; }
       return result;
     })();
     pending.set(key, {fingerprint, promise});

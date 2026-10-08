@@ -101,6 +101,16 @@ test('dual publish persists once; dot intent/receipt and mocked Feishu retain or
   assert.deepEqual(f.deliver().deliveries,[]);assert.equal(f.effects().length,1);assert.equal(f.call('doctor').ok,true);
 });
 
+test('canonical card replies start with real paragraphs and freeze their body through a conclusive no-send retry',t=>{
+  const f=fixture(t,{channels:['feishu']});
+  const text='The PDF is ready.\n\nIt contains the requested figures.';
+  f.publish(f.message({text,format:'card',response:{template:'detail',lead:text,links:[{label:'Source notes',url:'https://example.com/source(part)'}]}}));
+  f.mode('not_sent');const first=f.deliver().deliveries[0];assert.equal(first.state,'not_sent');
+  const frozen=f.ledger().deliveries[0].wire_body;assert.equal(frozen.header,undefined);assert.equal(frozen.elements[0].text.content,text);assert.doesNotMatch(JSON.stringify(frozen),/Task conversation|"button"/);
+  f.resolve(first,{status:'not_sent',message_id:undefined});f.mode('accepted');f.deliver();
+  assert.deepEqual(f.calls()[0],f.calls()[1]);assert.deepEqual(f.calls()[1].body,frozen);
+});
+
 test('Feishu transport keys preserve canonical card deliveries and dot receipt identities',t=>{
   const f=fixture(t);for(const id of ['card-one','card-two'])f.publish(f.message({id,format:'card'}));
   const before=f.ledger().deliveries,canonical=before.filter(n=>n.channel==='feishu');
@@ -369,7 +379,7 @@ test('verified completion creates one canonical pair, suppresses same-route watc
   const state=f.show();assert.equal(state.messages.length,1);assert.equal(state.messages[0].kind,'completed');assert.equal(state.deliveries.length,2);
   const notices=f.call('outbox').filter(n=>n.task_id===TASK);assert.equal(notices.length,1);assert.equal(notices[0].route.destination.id,'other-authorized-chat');
   const started=f.call('start','--consumer','completion-worker','--timeout-ms','0');assert.equal(started.notifications.length,2);assert.deepEqual(f.effects().map(e=>e.destination.id).sort(),['feishu-chat-one','other-authorized-chat']);
-  const card=f.effects().find(e=>e.destination.id==='feishu-chat-one');assert.equal(card.format,'card');assert.equal(card.body.header.text_tag_list[0].text.content,'已完成');
+  const card=f.effects().find(e=>e.destination.id==='feishu-chat-one');assert.equal(card.format,'card');assert.equal(card.body.header,undefined);assert.equal(card.body.elements[1].text.content,'已完成');
   assert.match(JSON.stringify(card.body),/完成于/);assert.doesNotMatch(JSON.stringify(card.body),/Synthetic acceptance|Fabricated isolated verification/);
   assert.equal(f.show().messages.length,1);assert.equal(started.conversation_deliveries.dot.length,1);assert.equal(f.call('show',TASK).status,'completed');
 });

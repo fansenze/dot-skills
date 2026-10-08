@@ -183,3 +183,7 @@ Package with `node "$SKILL_DIR/scripts/package.mjs" /absolute/output/manage-dot-
 For an authorized adapter upgrade, `allow-inbound --mode agent --context-from OLD_GRANT_ID[,OLDER_GRANT_ID]` explicitly preserves only old task-bound reference evidence for the exact same account/tenant/sender/destination and the new grant's current task scope. Maximum 20 explicit old agent grant IDs; no transitive inheritance, old input replay or policy reactivation. See [safe migration](migration-threaded-intake.md).
 
 For a Feishu reaction notice, `resolve-notice ID --status api_accepted --reaction-id ACTUAL_ID --evidence VERIFIED_REFERENCE` requires a provider reaction ID instead of `--message-id`. `outbox` and message claims identify reaction acknowledgements with `operation: react`; they never create a bot-message reference. See [topic receipts and channel rendering](feishu-presentation.md).
+
+## Image and PDF attachments
+
+`attachment-upload --id ID --connector ID --path FILE --allowed-root DIR --kind image|file --authorization-ref REF` uploads an authorized host-local file without sending. Inspect with `attachment-status --id ID`; `attachment-reconcile --id ID` reads the resident upload receipt without retrying. `attachment-reply --id MESSAGE_ID --resource-id UPLOAD_ID --inbound-id INBOX_ID --authorization-ref REF` queues the source-bound threaded message for `deliver`/`start`. See [attachments](attachments.md) for root configuration, durable states and recovery.

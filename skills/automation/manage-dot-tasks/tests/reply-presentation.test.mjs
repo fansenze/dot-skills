@@ -118,8 +118,8 @@ test('plain content is preserved while Markdown and native cards cannot interpre
  assert.ok(!markdown.includes('<at user_id="all">'));assert.ok(!markdown.includes('<script>'));assert.ok(!markdown.includes('[forged](https://evil.example)'));
  assert.ok(!markdown.includes('**bold**'));assert.ok(!markdown.includes('`code`'));
  assert.ok(stringContents(card).includes(attack));
- assert.ok(objects(card).every(row=>row.tag!=='markdown'&&row.tag!=='lark_md'));
- assert.ok(objects(card).some(row=>row.tag==='button'&&row.url==='https://example.com/report'));
+ assert.deepEqual(objects(card).filter(row=>row.tag==='lark_md').map(row=>row.content),['[可信资料](https://example.com/report)']);
+ assert.ok(objects(card).every(row=>row.tag!=='button'));
 });
 
 test('format choice honors per-message authorization, supported capabilities and the existing route',()=>{
@@ -152,7 +152,7 @@ test('verified links preserve text and card URL fidelity while Markdown safely e
  const url='https://example.com/report(part)?a=1&b=2';
  const response={template:'detail',lead:'Review A & B',links:[{label:'A & B',url}]};
  assert.ok(renderResponse(response,'text').includes(url));assert.ok(renderResponse(response,'text').includes('Review A & B'));
- assert.ok(objects(renderResponse(response,'card')).some(row=>row.tag==='button'&&row.url===url));
+ assert.ok(objects(renderResponse(response,'card')).some(row=>row.tag==='lark_md'&&row.content==='[A & B](https://example.com/report%28part%29?a=1&b=2)'));
  assert.ok(renderResponse(response,'markdown').includes('(https://example.com/report%28part%29?a=1&b=2)'));
 });
 
@@ -221,9 +221,23 @@ test('detail sections, decision options, brief metadata and hostile headings rem
   samples.brief
  ]){
   const card=renderResponse(response,'card');
-  assert.ok(objects(card).every(o=>!['markdown','lark_md'].includes(o.tag)));
-  assert.ok(objects(card).filter(o=>o.tag==='button').every(o=>o.url&&!o.value));
+  assert.ok(objects(card).filter(o=>o.tag==='lark_md').every(o=>!o.content.includes('<at ')&&!o.content.includes('**choose**')));
+  assert.ok(objects(card).every(o=>o.tag!=='button'));
   assert.ok(stringContents(card).includes(response.lead));
   if(response!==samples.brief)assert.ok(stringContents(card).some(s=>s.includes(heading)));
+ }
+});
+
+test('explanation, progress and result replies start with content, keep real newlines and escape multiple native links',()=>{
+ const lead='The draft is ready.\n\nTwo checks remain:\n• Confirm the scope\n• Review the PDF';
+ const links=[{label:'Notes [review] *final* <at user_id="all">',url:'https://example.com/notes(part)?a=1&b=2'},{label:'Source\nreport',url:'https://example.com/source'}];
+ for(const status of [undefined,'In progress','Completed']){
+  const response={template:'detail',lead,...(status?{status}:{}),links};
+  const card=JSON.parse(JSON.stringify(renderResponse(response,'card')));
+  assert.equal(card.header,undefined);assert.equal(card.elements[0].text.content,lead);assert.ok(!card.elements[0].text.content.includes('\\n'));
+  assert.equal(objects(card).filter(o=>o.tag==='button').length,0);
+  const md=objects(card).filter(o=>o.tag==='lark_md').map(o=>o.content);
+  assert.equal(md.length,2);assert.ok(md[0].includes('Notes \\[review\\] \\*final\\* ‹at'));assert.ok(md[0].includes('notes%28part%29?a=1&b=2'));assert.equal(md[1],'[Source report](https://example.com/source)');
+  assert.doesNotMatch(JSON.stringify(card),/Task conversation|Task response|任务回复|任务详情/);
  }
 });

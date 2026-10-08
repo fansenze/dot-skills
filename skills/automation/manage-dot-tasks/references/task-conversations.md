@@ -250,7 +250,12 @@ verified conversation/root; do not guess or reconstruct a provider message ID.
 Use the claim's `delivery_text`, which includes the plain-text rendering of an
 optional structured response. Sending only its lead would lose options or
 supporting sections. The dot surface uses plain text even if another channel
-uses Markdown or cards.
+uses Markdown or cards. Untitled replies begin with their content; no internal
+"Task conversation" heading is added. Feishu freezes the rendered body and format
+with the send intent so a reviewed no-send retry preserves the original bytes.
+For separately authorized image/PDF replies use the source-bound
+[attachment outbox](attachments.md); accepted attachment receipts retain topic
+correlation and never mirror file bytes to dot.
 Record the actual result with the claim's token. A lease is fencing, not proof
 that a tool succeeded or permission for another send.
 

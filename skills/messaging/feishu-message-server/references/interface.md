@@ -2,6 +2,8 @@
 
 The server receives, durably stores, sends and replies. It has no task model, task executor, command authorization grants or notification retry loop. Manage Dot Tasks calls this interface through its adapter; other consumers can use it without adopting that skill. The CLI normally reuses a host-local resident service. No externally reachable HTTP/MCP service or arbitrary execution endpoint is provided; explicit `--standalone` preserves direct one-shot use.
 
+Image/PDF commands and independent upload/message receipts are specified in [attachments](attachments.md). Upload, upload-status and resource-key sends require the resident journal.
+
 ## Capabilities and selection
 
 ```bash
@@ -10,7 +12,7 @@ bash feishu.sh check --config "$CONFIG_FILE"
 bash feishu.sh identity --config "$CONFIG_FILE"
 ```
 
-`capabilities` in its default local mode returns `{protocol_version:1,name:"feishu-message-server",formats:["text","markdown","card"],send:true,reply:true,receive:true,durable_cursor:true,presentation:"feishu",react:true,delivery_receipts:"api_acceptance_only",automatic_retry:false}` without loading configuration or calling the network. `identity` loads only the selected configuration and returns app ID/brand, never its secret. It does not prove network readiness or recipient ownership. CLI JSON version 1 is additive; consumers reject unsupported major versions and unavailable capabilities. Dependencies must be installed before invoking the server CLI. Commands use the pinned runtime on the user's selected service host, with configuration readable there. Follow [service routing](remote-configuration.md): dot hosting stays direct with an existing local configuration or its verified Library copy; explicitly selected computer hosting uses the bridge. A source path never selects the service host.
+`capabilities` in its default local mode returns `{protocol_version:1,name:"feishu-message-server",formats:["text","markdown","card","image","file"],upload:true,send:true,reply:true,receive:true,durable_cursor:true,presentation:"feishu",react:true,delivery_receipts:"api_acceptance_only",automatic_retry:false}` without loading configuration or calling the network. `identity` loads only the selected configuration and returns app ID/brand, never its secret. It does not prove network readiness or recipient ownership. CLI JSON version 1 is additive; consumers reject unsupported major versions and unavailable capabilities. Dependencies must be installed before invoking the server CLI. Commands use the pinned runtime on the user's selected service host, with configuration readable there. Follow [service routing](remote-configuration.md): dot hosting stays direct with an existing local configuration or its verified Library copy; explicitly selected computer hosting uses the bridge. A source path never selects the service host.
 
 Installation, `setup`, `prepare`, `init`, capability inspection, sending and inbox inspection do not implicitly start the receiver. `init` persists only when the user requested that configuration write; `prepare` uses a private temporary file. Reuse an existing selected config when no preparation is needed. Start/reuse a matching receiver only within startup authorization. Runtime data/configuration stay outside exported code. A local service connection is not evidence of a healthy Feishu WebSocket, and neither proves message acceptance.
 

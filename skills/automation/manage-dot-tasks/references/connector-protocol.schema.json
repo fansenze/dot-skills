@@ -34,7 +34,7 @@
         "formats": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/format"
+            "$ref": "#/$defs/wire_format"
           }
         },
         "send": {
@@ -58,6 +58,10 @@
         },
         "react": {
           "type": "boolean"
+        },
+        "upload": {
+          "type": "boolean",
+          "description": "Host-local authorized upload, inspectUpload and read-only uploadStatus methods."
         }
       },
       "additionalProperties": false
@@ -118,7 +122,7 @@
           "additionalProperties": false
         },
         "format": {
-          "$ref": "#/$defs/format"
+          "$ref": "#/$defs/wire_format"
         },
         "body": {
           "type": [
@@ -143,7 +147,28 @@
           "description": "Optional frozen thread reply flag; absent preserves legacy false."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "format": {
+                "enum": [
+                  "image",
+                  "file"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "body": {
+                "$ref": "#/$defs/resource_body"
+              }
+            }
+          }
+        }
+      ]
     },
     "send_result": {
       "type": "object",
@@ -910,6 +935,28 @@
           }
         }
       ]
+    },
+    "wire_format": {
+      "enum": [
+        "text",
+        "markdown",
+        "card",
+        "image",
+        "file"
+      ]
+    },
+    "resource_body": {
+      "type": "object",
+      "required": [
+        "resource_id"
+      ],
+      "properties": {
+        "resource_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,50}$"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

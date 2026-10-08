@@ -9,8 +9,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { digest, loadConnector, sendResult, bounded, requireText, ConnectorError } from './connectors/contract.mjs';
+import {ATTACHMENT_OPTIONS,createAttachments,validateUploads} from './attachments.mjs';
 
 export const INTEGRATION_OPTIONS = {
+  ...ATTACHMENT_OPTIONS,
   'handshake-begin': ['id','connector','account','brand','authorization-ref','grant-id','commands','tasks','allow-new','updates','watch-id','initial','tenant','sender','destination','ttl-ms','format','reply-mode','language'],
   'handshake-status': [], 'handshake-cancel': [],
   connect: ['id', 'module', 'settings-file'], connections: [], disconnect: [],
@@ -59,6 +61,7 @@ export function readIntegration(store) {
   for (const c of data.connections) {
     if (typeof c.enabled !== 'boolean' || c.binding !== digest({id: c.id, module: c.module, settings: c.settings, capabilities: c.capabilities, module_sha256: c.module_sha256})) throw new ConnectorError('Connection binding integrity failed');
   }
+  validateUploads(data);
   const policies = [...data.watches, ...data.grants];
   if (new Set(policies.map(p => p.id)).size !== policies.length) throw new ConnectorError('Duplicate policy identities');
   for (const p of policies) if (!data.connections.some(c => c.id === p.connector) || !Array.isArray(p.tasks) || typeof p.enabled !== 'boolean') throw new ConnectorError('Invalid policy record');
@@ -74,7 +77,11 @@ export function readIntegration(store) {
       const incoming = data.inbox.find(r=>'received:'+r.id===n.event_id && r.grant_id===p.id && r.binding===c.binding);
       if (!validReceiptPresentation(c.capabilities,n,incoming) || n.reply_to || n.reply_in_thread || n.wire_format!==undefined || (n.wire_body!==undefined && digest(n.wire_body)!==digest(n.reaction))) throw new ConnectorError('Invalid receipt reaction');
     } else if (n.reaction !== undefined) throw new ConnectorError('Unexpected receipt reaction');
-    if (n.wire_format !== undefined && (!c.capabilities.formats.includes(n.wire_format) || n.wire_format !== responseFormat(n.document,n.route.format,c.capabilities))) throw new ConnectorError('Notification wire format integrity failed');
+    if (n.attachment) {
+      const upload=data.uploads?.find(u=>u.id===n.attachment.upload_id), origin=data.inbox.find(r=>r.id===n.attachment.inbound_id);
+      if (!upload || upload.state!=='uploaded' || upload.binding!==n.route.binding || upload.account!==n.route.account_id || digest(upload.receipt.resource)!==digest(n.attachment.resource) || origin?.grant_id!==p.id || origin?.binding!==c.binding || origin.envelope.destination_id!==n.route.destination.id || n.reply_to!==(origin.envelope.root_id??origin.envelope.message_id) || n.reply_in_thread!==true || (n.wire_body!==undefined && digest(n.wire_body)!==digest({resource_id:upload.key}))) throw new ConnectorError('Attachment route or resource integrity failed');
+    }
+    if (n.wire_format !== undefined && (!c.capabilities.formats.includes(n.wire_format) || n.wire_format !== (n.attachment?.resource.kind ?? responseFormat(n.document,n.route.format,c.capabilities)))) throw new ConnectorError('Notification wire format integrity failed');
     if (n.reply_in_thread !== undefined && (typeof n.reply_in_thread !== 'boolean' || !n.reply_to)) throw new ConnectorError('Invalid reply options');
     if (n.attempts < 0 || !Number.isFinite(Date.parse(n.available_at)) || (n.lease && !Number.isFinite(Date.parse(n.lease.until)))) throw new ConnectorError('Invalid notification recovery state');
   }
@@ -164,8 +171,10 @@ export function taskNotificationWrites(store, task, previous, suppliedData = nul
 export function createIntegration({store, scheduler, makeTask}) {
   const locked = fn => store.locked(() => { store.config(); return fn(); });
   const save = data => store.commit(writes(data));
+  const attachments=createAttachments({locked,read:()=>readIntegration(store),save});
   const messages = createMessageInbox({store,scheduler,makeTask,read:readIntegration,save,writes,routeFor,enqueue,document,taskNotices:taskNotificationWrites});
   const publicNotice = n => ({id: n.id, event_id: n.event_id, task_id: n.task_id, route: n.route, state: n.state,
+    ...(n.attachment ? {attachment:n.attachment} : {}),
     ...(n.operation ? {operation:n.operation,reaction:n.reaction} : {}), attempts: n.attempts, available_at: n.available_at, receipt: n.receipt});
   function policyActive(data, notice) {
     const c = data.connections.find(c => c.id === notice.route.connector_id);
@@ -243,8 +252,9 @@ export function createIntegration({store, scheduler, makeTask}) {
       try {
         const c = await locked(() => readIntegration(store).connections.find(c => c.id === n.route.connector_id));
         ({adapter} = await bounded(() => loadConnector(c), 15000));
-        format = n.operation === 'react' ? undefined : n.wire_format ?? responseFormat(n.document, n.route.format, c.capabilities);
-        body = n.wire_body ?? (n.operation === 'react' ? n.reaction : renderConnectorDocument(c.capabilities,format,structuredClone(n.document)));
+        format = n.operation === 'react' ? undefined : n.wire_format ?? n.attachment?.resource.kind ?? responseFormat(n.document, n.route.format, c.capabilities);
+        body = n.wire_body ?? (n.attachment ? {resource_id:n.attachment.resource.upload_id} : n.operation === 'react' ? n.reaction : renderConnectorDocument(c.capabilities,format,structuredClone(n.document)));
+        if(n.attachment && (!c.capabilities.upload || !c.capabilities.formats.includes(format))) throw new ConnectorError('Attachment capability unavailable');
         if (body === undefined || Buffer.byteLength(JSON.stringify(body)) > 28000) throw new ConnectorError('Notification render exceeds bounds');
       } catch {
         await record(n.id, n.lease.token, {status: 'not_sent', idempotency_key: n.key, retryable: false, error_code: 'adapter-preflight-failed'});
@@ -366,6 +376,19 @@ export function createIntegration({store, scheduler, makeTask}) {
     return {ingested, has_more: page.has_more};
   }
   async function run(args) {
+    if (Object.hasOwn(ATTACHMENT_OPTIONS,args.command) && args.command!=='attachment-reply') return attachments.run(args);
+    if (args.command==='attachment-reply') return locked(()=>{
+      const data=readIntegration(store), upload=data.uploads?.find(u=>u.id===args.resource_id), entry=data.inbox.find(r=>r.id===args.inbound_id);
+      requireText(args.id,'attachment message ID');requireText(args.authorization_ref,'attachment disclosure authorization');
+      if (!upload || upload.state!=='uploaded' || !entry || !agentMessage(entry) || !['claimed','recorded','done'].includes(entry.status)) throw new ConnectorError('Attachment reply requires an uploaded resource and reviewed intake');
+      const c=data.connections.find(c=>c.id===entry.connector&&c.enabled), g=grantForMessage(data.grants.find(g=>g.id===entry.grant_id),entry);
+      if(!c || !g?.enabled || !c.capabilities.upload || !c.capabilities.reply || upload.binding!==c.binding || upload.account!==entry.envelope.account_id || (entry.task_id&&!grantCovers(data,g,entry.task_id))) throw new ConnectorError('Attachment source or account is outside the active binding');
+      const eventId='attachment:'+args.id, route=routeFor(c,g,entry), attachment={upload_id:upload.id,inbound_id:entry.id,resource:structuredClone(upload.receipt.resource),authorization_ref:args.authorization_ref};
+      const prior=data.outbox.find(n=>n.event_id===eventId);
+      if(prior){if(digest(prior.attachment)!==digest(attachment)||digest(prior.route)!==digest(route))throw new ConnectorError('Attachment message ID conflicts with prior route or resource');return publicNotice(prior);}
+      enqueue(data,eventId,route,null,entry.task_id??null,entry.envelope.root_id??entry.envelope.message_id,true);
+      const notice=data.outbox.at(-1);notice.attachment=attachment;save(data);return publicNotice(notice);
+    });
     if (args.command.startsWith('message-')) return messages.run(args);
     if (args.command === 'start') {
       const timeout = args.timeout_ms === undefined ? 30000 : Number(args.timeout_ms);

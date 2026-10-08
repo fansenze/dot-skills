@@ -11,17 +11,24 @@ const replyContext = message => Object.fromEntries(['parent_id', 'root_id', 'thr
   .map(key => [key, message[key]]));
 
 export function createConnector(settings) {
-  const fields = ['server', 'config_ref', 'state_dir', 'account_id', 'brand'];
+  const fields = ['server', 'config_ref', 'state_dir', 'account_id', 'brand', 'attachment_roots'];
   if (!settings || Object.keys(settings).some(k => !fields.includes(k))) throw new ConnectorError('Feishu settings accept only server/config_ref/state_dir paths, account_id and brand');
   for (const key of fields.slice(0, 3)) if (!path.isAbsolute(requireText(settings[key], key, 2048))) throw new ConnectorError('Feishu settings paths must be absolute');
   requireText(settings.account_id, 'account ID');
   if (!['feishu', 'lark'].includes(settings.brand)) throw new ConnectorError('Explicit Feishu/Lark brand required');
   if (!fs.statSync(settings.server).isFile()) throw new ConnectorError('Feishu server entry point is unavailable');
+  if (settings.attachment_roots !== undefined && (!Array.isArray(settings.attachment_roots) || settings.attachment_roots.length > 20 || settings.attachment_roots.some(p=>typeof p!=='string'||!path.isAbsolute(p)))) throw new ConnectorError('attachment_roots must be an explicit list of authorized absolute directories');
+  const uploadArgs = message => {
+    const root = requireText(message.allowedRoot,'authorized root',2048);
+    if (!settings.attachment_roots?.includes(root)) throw new ConnectorError('Attachment root is outside the reviewed connector binding');
+    return ['--path',requireText(message.filePath,'attachment path',2048),'--allowed-root',root,'--kind',message.kind,...(message.sha256?['--sha256',message.sha256]:[])];
+  };
+  const bindingArgs = ['--config',settings.config_ref,'--state-dir',settings.state_dir,'--expected-app-id',settings.account_id,'--expected-brand',settings.brand];
   async function invoke(args, body, signal) {
     const env = {...process.env}; delete env.DEBUG; delete env.NODE_DEBUG;
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', settings.server, ...args], {stdio: ['pipe', 'pipe', 'pipe'], env, signal});
-      const timer = setTimeout(() => child.kill('SIGKILL'), ['send','reply','react'].includes(args[0]) ? 74000 : 14000);
+      const timer = setTimeout(() => child.kill('SIGKILL'), ['send','reply','react','upload'].includes(args[0]) ? 74000 : 14000);
       let stdout = '', size = 0;
       child.stdout.on('data', data => { size += data.length; if (size > 4 * 1024 * 1024) child.kill('SIGKILL'); else stdout += data; });
       // Do not copy raw stderr, CLI exceptions, credentials or message bodies into diagnostics.
@@ -34,18 +41,30 @@ export function createConnector(settings) {
   async function send(message, signal, reply = false) {
     if (message.account_id !== settings.account_id) return {status: 'not_sent', idempotency_key: message.idempotency_key, retryable: false, error_code: 'binding-mismatch'};
     const args = [reply ? 'reply' : 'send', '--config', settings.config_ref, '--state-dir', settings.state_dir, '--expected-app-id', settings.account_id, '--expected-brand', settings.brand,
-      '--format', message.format, '--stdin', '--idempotency-key', message.idempotency_key];
+      '--format', message.format, '--idempotency-key', message.idempotency_key];
+    const attachment = ['image','file'].includes(message.format);
+    if (attachment) args.push('--resource-id',requireText(message.body?.resource_id,'resource ID',50));
+    else args.push('--stdin');
     if (reply) {
       args.push('--message-id', requireText(message.reply_to, 'reply target'));
       if (message.reply_in_thread === true) args.push('--reply-in-thread');
     }
     else args.push('--receive-id', requireText(message.destination.id, 'destination'), '--receive-id-type', message.destination.type);
-    const result = await invoke(args, typeof message.body === 'string' ? message.body : JSON.stringify(message.body), signal);
+    const result = await invoke(args, attachment ? undefined : typeof message.body === 'string' ? message.body : JSON.stringify(message.body), signal);
     return {...result, status: result.ok === true && result.message_id ? 'api_accepted' : result.status,
       retryable: result.status === 'not_sent' && ['ECONNABORTED', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET'].includes(result.error_code)};
   }
   return {
-    capabilities: () => invoke(['capabilities']),
+    capabilities: async () => ({...await invoke(['capabilities']),upload:Boolean(settings.attachment_roots?.length)}),
+    inspectUpload: (descriptor,{signal}={}) => invoke(['inspect-upload',...uploadArgs(descriptor)],undefined,signal),
+    upload: (message,{signal}={}) => {
+      if (message.account_id!==settings.account_id) throw new ConnectorError('Attachment account mismatch');
+      return invoke(['upload',...bindingArgs,...uploadArgs(message.descriptor),'--idempotency-key',message.idempotency_key],undefined,signal);
+    },
+    uploadStatus: (message,{signal}={}) => {
+      if (message.account_id!==settings.account_id) throw new ConnectorError('Attachment account mismatch');
+      return invoke(['upload-status',...bindingArgs,'--resource-id',message.idempotency_key],undefined,signal);
+    },
     send: (message, {signal} = {}) => send(message, signal),
     reply: (message, {signal} = {}) => send(message, signal, true),
     async react(message, {signal} = {}) {

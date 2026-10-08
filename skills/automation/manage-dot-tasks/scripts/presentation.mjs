@@ -63,6 +63,7 @@ export function taskResponseDocument(tasks, language = 'zh', detail = tasks.leng
 /** Completion notifications carry the outcome; explicit detail queries retain evidence. */
 export function taskNotificationDocument(task, language = 'zh') {
   const doc = taskResponseDocument([task],language);
+  delete doc.response.title;
   if (task.status === 'completed') {
     doc.response.sections = doc.response.sections.filter(section => section.title === (language === 'zh' ? '结果覆盖' : 'Result coverage'));
   }

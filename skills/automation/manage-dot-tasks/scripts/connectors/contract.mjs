@@ -15,12 +15,13 @@ export function requireText(value, name, max = 256) {
 }
 export function capabilities(value) {
   if (value?.protocol_version !== PROTOCOL_VERSION || !Array.isArray(value.formats) ||
-    value.formats.some(f => !['text', 'markdown', 'card'].includes(f)) ||
+    value.formats.some(f => !['text', 'markdown', 'card', 'image', 'file'].includes(f)) ||
     ['send', 'reply', 'receive', 'durable_cursor'].some(k => typeof value[k] !== 'boolean')) throw new ConnectorError('Incompatible connector capabilities');
   if (value.presentation !== undefined && !['default','feishu'].includes(value.presentation)) throw new ConnectorError('Unsupported presentation channel');
   if (value.react !== undefined && typeof value.react !== 'boolean') throw new ConnectorError('Invalid reaction capability');
+  if (value.upload !== undefined && typeof value.upload !== 'boolean') throw new ConnectorError('Invalid upload capability');
   return {presentation:value.presentation ?? 'default', react:value.react ?? false, protocol_version: 1, name: requireText(value.name, 'connector name'), formats: [...new Set(value.formats)],
-    send: value.send, reply: value.reply, receive: value.receive, durable_cursor: value.durable_cursor};
+    send: value.send, reply: value.reply, receive: value.receive, durable_cursor: value.durable_cursor,...(value.upload !== undefined ? {upload:value.upload} : {})};
 }
 export async function loadConnector(connection) {
   if (!path.isAbsolute(connection.module)) throw new ConnectorError('Connector module must be an absolute path');
@@ -33,6 +34,7 @@ export async function loadConnector(connection) {
   for (const method of ['send', 'reply', 'receive', 'react']) {
     if (caps[method] && typeof adapter[method] !== 'function') throw new ConnectorError(`Connector lacks ${method}`);
   }
+  if (caps.upload && ['inspectUpload','upload','uploadStatus'].some(method=>typeof adapter[method] !== 'function')) throw new ConnectorError('Connector lacks attachment methods');
   if (connection.capabilities && JSON.stringify(caps) !== JSON.stringify(connection.capabilities)) throw new ConnectorError('Connector capabilities changed; review a new binding');
   return {adapter, capabilities: caps, module_sha256: hash};
 }

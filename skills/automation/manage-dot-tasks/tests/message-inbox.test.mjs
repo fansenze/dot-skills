@@ -86,7 +86,7 @@ test('create records a stable task, source binding, decision and original-messag
   await assert.rejects(f.record(message,{...d,reply:'不同答复'}),/immutable/);
   await f.ack(message);assert.equal((await f.ack(message)).duplicate,true);
   await f.call('deliver','--consumer','sender');const effects=lines(path.join(f.external,'effects.jsonl'));
-  assert.equal(effects.length,2);assert.equal(effects[0].format,'text');assert.equal(effects[0].body,'收到，正在处理。');assert.ok(effects.every(e=>e.reply_to==='message-1'&&e.reply_in_thread===true));assert.equal(effects[1].destination.id,'chat-one');assert.deepEqual(effects[1].body,renderResponse({template:'detail',title:'任务回复',lead:d.reply},'card'));
+  assert.equal(effects.length,2);assert.equal(effects[0].format,'text');assert.equal(effects[0].body,'收到，正在处理。');assert.ok(effects.every(e=>e.reply_to==='message-1'&&e.reply_in_thread===true));assert.equal(effects[1].destination.id,'chat-one');assert.deepEqual(effects[1].body,renderResponse({template:'detail',lead:d.reply},'card'));
   await f.ingest(f.incoming(2,{text:'继续刚才的任务'}));const follow=(await f.next()).messages[0];
   assert.deepEqual(follow.context.tasks.map(t=>t.id),[task.id]);assert.equal(follow.context.messages[0].task_id,task.id);
 });
@@ -174,7 +174,7 @@ for(const updates of [false,true])test(`associated task completion ${updates?'us
   assert.equal(f.state().outbox.length,2);
   await f.call('complete',created.task_id,'--summary','已核对并完成','--evidence','Synthetic acceptance');
   assert.equal(f.state().outbox.length,updates?3:2);
-  if(updates){const notice=f.state().outbox[2];assert.equal(notice.reply_to,'message-1');assert.equal(notice.reply_in_thread,true);assert.equal(notice.task_id,created.task_id);assert.equal(notice.route.policy_id,'grant-one');assert.equal(notice.document.response.title,'整理发布资料');assert.equal(notice.document.response.status,'已完成');assert.deepEqual(notice.document.response.sections,[]);}
+  if(updates){const notice=f.state().outbox[2];assert.equal(notice.reply_to,'message-1');assert.equal(notice.reply_in_thread,true);assert.equal(notice.task_id,created.task_id);assert.equal(notice.route.policy_id,'grant-one');assert.equal(notice.document.response.title,undefined);assert.equal(notice.document.response.status,'已完成');assert.deepEqual(notice.document.response.sections,[]);}
   await f.register('task-unrelated');await f.call('update','task-unrelated','--summary','Unrelated change');
   await f.call('event',created.task_id,'--text','Routine note after completion');
   assert.equal(f.state().outbox.length,updates?3:2);

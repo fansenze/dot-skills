@@ -176,7 +176,7 @@ export function createMessageInbox({store, scheduler, makeTask, read, save, writ
       if(d.decision==='create' && scheduler.execute({command:'lookup',source:'connector-'+r.connector,source_ref:r.id})) fail('Message source already belongs to a task; inspect and reconcile before creating');
       if(d.decision==='create') task=makeTask({id:'task-'+r.id.slice(0,32),title:d.title,goal:d.goal,next_action:d.next_action,summary:d.summary,source:'connector-'+r.connector,status:'queued',blocker:''});
       r.decision=structuredClone(d); r.task_id=task?.id??null; r.status='recorded'; r.recorded_at=stamp();
-      if(!canonicalDecision(store,r,d,task?.id))enqueue(data,'message:'+r.id,routeFor(c,g,r),responseDocument(d.response ?? {template:'detail',title:g.language==='en'?'Task response':'任务回复',lead:d.reply},stamp()),r.task_id,g.reply_mode==='reply'?r.envelope.message_id:null, g.reply_mode==='reply');
+      if(!canonicalDecision(store,r,d,task?.id))enqueue(data,'message:'+r.id,routeFor(c,g,r),responseDocument(d.response ?? {template:'detail',lead:d.reply},stamp()),r.task_id,g.reply_mode==='reply'?r.envelope.message_id:null, g.reply_mode==='reply');
       // Combine the task's existing watch policies with the inbox transaction,
       // instead of clobbering either integration snapshot in Store.save.
       if(d.decision==='create') {

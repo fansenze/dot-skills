@@ -2,10 +2,15 @@
 import { SafeError } from './config.mjs';
 
 export const CAPABILITIES = Object.freeze({protocol_version: 1, name: 'feishu-message-server',
-  formats: ['text', 'markdown', 'card'], send: true, reply: true, receive: true, durable_cursor: true,
+  formats: ['text', 'markdown', 'card', 'image', 'file'], upload: true, send: true, reply: true, receive: true, durable_cursor: true,
   presentation:'feishu', react:true, delivery_receipts: 'api_acceptance_only', automatic_retry: false});
 
 export function formatContent(format, input) {
+  if (['image','file'].includes(format)) {
+    const field = format + '_key';
+    if (!input || Object.keys(input).length !== 1 || typeof input[field] !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(input[field])) throw new SafeError('Invalid uploaded resource key');
+    return {msg_type:format,content:JSON.stringify(input)};
+  }
   if (format === 'text') return {msg_type: 'text', content: JSON.stringify({text: input})};
   if (format === 'markdown') {
     if (typeof input !== 'string' || !input.trim() || !input.isWellFormed()) throw new SafeError('Markdown must be non-empty valid Unicode');
@@ -20,5 +25,5 @@ export function formatContent(format, input) {
     }
     return {msg_type: 'interactive', content: JSON.stringify(input)};
   }
-  throw new SafeError('Unsupported format; choose text, markdown or card');
+  throw new SafeError('Unsupported format; choose text, markdown, card, image or file');
 }

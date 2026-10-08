@@ -58,6 +58,9 @@ function active(store,b) {
 /** A verified original-topic match only; never infer by title, recency or text. */
 export function conversationContext(store, entry) {
   const d=readConversations(store), refs=new Set([entry.envelope?.message_id,entry.envelope?.parent_id,entry.envelope?.root_id,entry.envelope?.thread_id].filter(Boolean));
+  // An accepted attachment reply is also an original-topic reference, scoped to
+  // this exact grant and binding before the usual sender/task authority checks.
+  for (const n of readIntegration(store).outbox) if (n.attachment && n.route.policy_id===entry.grant_id && n.route.binding===entry.binding && n.receipt?.status==='api_accepted' && refs.has(n.receipt.message_id)) refs.add(n.reply_to);
   const matches=d.bindings.filter(b=>b.enabled&&b.feishu.grant_id===entry.grant_id && (refs.has(b.feishu.root_id)||d.deliveries.some(n=>n.task_id===b.task_id&&n.channel==='feishu'&&n.receipt?.status==='api_accepted'&&refs.has(n.receipt.message_id))));
   const current=matches.filter(b=>{try{const {g}=active(store,b);return !g.all_senders || (entry.connector===g.connector && entry.envelope.account_id===g.account && entry.envelope.tenant_id===g.tenant && entry.envelope.sender_id===g.sender && entry.envelope.destination_id===g.destination);}catch{return false;}});
   return {total_matches:current.length,matches:current.slice(0,20).map(b=>{const questions=d.questions.filter(q=>q.task_id===b.task_id),messages=d.messages.filter(m=>m.task_id===b.task_id);return {task_id:b.task_id,root_id:b.feishu.root_id,questions:questions.slice(-20).map(({consumptions,...q})=>({...q,consumption_count:consumptions?.length??0})),total_questions:questions.length,messages:messages.slice(-20),total_messages:messages.length};}),coverage:'at most 20 tasks, last 20 questions/messages each; counts expose partial context; conversation-show retrieves one full task ledger'};
@@ -167,7 +170,8 @@ export function createConversations({store}) {
     const row=message(d,b,{...v,input_digest:digest(v)});save(d);return row;
   }
   function answer(d,id,v,requiresQuestion=true) {
-    const b=binding(d,id),{g}=active(store,b);
+    const b=binding(d,id),{g,c}=active(store,b);
+    const attachmentRef = ref => v.channel==='feishu' && readIntegration(store).outbox.some(n=>n.attachment&&n.task_id===id&&n.route.binding===c.binding&&n.route.policy_id===g.id&&n.reply_to===b.feishu.root_id&&n.receipt?.status==='api_accepted'&&n.receipt.message_id===ref);
     object(v,['id','channel','provider_message_id','identity','occurred_at','question_id','question_revision','in_reply_to','text','privacy','audience','evidence_ref','redacted']);
     for(const k of ['id','provider_message_id','in_reply_to','evidence_ref'])identifier(v[k]);reviewed(v);text(v.text);
     if(requiresQuestion&&!v.question_id)fail('Question reference required; use conversation-input for ordinary messages');
@@ -185,12 +189,12 @@ export function createConversations({store}) {
     const questionMessage=q?d.messages.find(m=>m.question_id===q.id&&m.question_revision===v.question_revision):null;
     const sent=q?d.deliveries.find(n=>n.channel===v.channel&&n.message_id===questionMessage?.id&&n.receipt?.status==='api_accepted'):null;
     if(q&&(!sent||![questionMessage.id,sent.receipt.message_id].includes(v.in_reply_to)))fail('Question reference requires its accepted channel delivery');
-    if(!q&&v.in_reply_to!==b[v.channel].root_id&&!d.deliveries.some(n=>n.task_id===id&&n.channel===v.channel&&n.receipt?.status==='api_accepted'&&n.receipt.message_id===v.in_reply_to))fail('Input needs a verified task-topic reference');
+    if(!q&&v.in_reply_to!==b[v.channel].root_id&&!attachmentRef(v.in_reply_to)&&!d.deliveries.some(n=>n.task_id===id&&n.channel===v.channel&&n.receipt?.status==='api_accepted'&&n.receipt.message_id===v.in_reply_to))fail('Input needs a verified task-topic reference');
     if(v.channel==='feishu') {
       const r=readIntegration(store).inbox.find(r=>r.id===v.evidence_ref&&r.grant_id===g.id&&r.envelope?.message_id===v.provider_message_id);
       if(r&&!v.redacted&&r.envelope.text!==v.text)fail('Input text must match the stored message; mark sanitized redactions explicitly');
       const exactReply=r&&sent&&r.envelope.parent_id===sent.receipt.message_id;
-      const topic=r&&(r.envelope.root_id===b.feishu.root_id||r.envelope.parent_id===b.feishu.root_id);
+      const topic=r&&(r.envelope.root_id===b.feishu.root_id||r.envelope.parent_id===b.feishu.root_id||attachmentRef(r.envelope.parent_id));
       if(!r||!['pending','claimed','recorded','done'].includes(r.status)||Date.parse(r.envelope.received_at)<Date.parse(b.created_at)||(r.envelope.occurred_at??r.envelope.received_at)!==v.occurred_at||!Object.entries(v.identity).every(([k,value])=>r.envelope[k]===value)||!exactReply&&!topic)fail('Feishu input requires stored verified incoming envelope and topic correlation');
     }
     const a={...v,task_id:id,origin,input_digest:digest(v),received_at:stamp(),outcome:'appended',receive_sequence:d.answers.length+1};
@@ -217,7 +221,7 @@ export function createConversations({store}) {
       save(d);return null;
     });
   }
-  async function begin(id,token) {return locked(d=>{const n=delivery(d,id,token);if(n.state!=='claimed')fail('Send intent already exists; reconcile, never resend');n.state='sending';n.attempts++;n.started_at=stamp();save(d);return {...n,proceed:true,message:d.messages.find(m=>m.id===n.message_id)};});}
+  async function begin(id,token,body,format) {return locked(d=>{const n=delivery(d,id,token);if(n.state!=='claimed')fail('Send intent already exists; reconcile, never resend');if(body!==undefined){if(n.wire_body!==undefined&&(digest(n.wire_body)!==digest(body)||n.wire_format!==format))fail('Canonical retry payload must remain identical');n.wire_body=body;n.wire_format=format;}n.state='sending';n.attempts++;n.started_at=stamp();save(d);return {...n,proceed:true,message:d.messages.find(m=>m.id===n.message_id)};});}
   async function receipt(id,token,v) {return locked(d=>{
     const existing=d.deliveries.find(n=>n.id===id);const r=sendResult(v,id);
     if(existing?.last_token===token&&digest(existing.receipt)===digest(r))return existing;
@@ -233,12 +237,12 @@ export function createConversations({store}) {
       let adapter,body,format,snapshot;
       try {
         snapshot=await locked(d=>{const b=binding(d,n.task_id);return {...active(store,b),b};});
-        ({adapter}=await bounded(()=>loadConnector(snapshot.c),15000));format=n.message.format;
+        ({adapter}=await bounded(()=>loadConnector(snapshot.c),15000));format=n.wire_format??n.message.format;
         if(!snapshot.c.capabilities.formats.includes(format))fail('Unsupported message format');
-        body=renderConnectorDocument(snapshot.c.capabilities,format,responseDocument(n.message.response??{template:'detail',title:({question:'Question',question_update:'Updated question',blocked:'Action needed',completed:'Task result',user_message:'User message'})[n.message.kind]??'Task conversation',lead:n.message.text}));
+        body=n.wire_body??renderConnectorDocument(snapshot.c.capabilities,format,responseDocument(n.message.response??{template:'detail',lead:n.message.text}));
         if(body===undefined||Buffer.byteLength(JSON.stringify(body))>28000)fail('Rendered message exceeds bounds');
       } catch {results.push(await receipt(n.id,n.lease.token,{status:'not_sent',idempotency_key:n.id,retryable:false,error_code:'adapter-preflight-failed'}));continue;}
-      await begin(n.id,n.lease.token);const key=transportKey(n.id);let result;
+      await begin(n.id,n.lease.token,body,format);const key=transportKey(n.id);let result;
       try {result=await bounded(signal=>adapter.reply({account_id:snapshot.g.account,destination:{type:'chat_id',id:snapshot.g.destination},format,body,reply_to:n.root_id,reply_in_thread:true,idempotency_key:key},{signal}));}catch{result=null;}
       // Validate the actual transport receipt before associating it with the canonical delivery.
       const checked=sendResult(result,key);

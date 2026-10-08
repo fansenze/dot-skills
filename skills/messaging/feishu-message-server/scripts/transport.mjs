@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { SafeError } from './config.mjs';
 import { extractMessage } from './messages.mjs';
 import { formatContent } from './formats.mjs';
+import {readUploadFile} from './resources.mjs';
 
 // The SDK may log credentials, signed socket URLs, raw events or HTTP errors.
 // Lifecycle callbacks below are the only source of transport logs.
@@ -42,6 +43,7 @@ function requestPhase(request) {
   catch { return 'unknown'; }
   if (pathname === '/open-apis/auth/v3/tenant_access_token/internal') return 'authentication';
   if (request.method?.toUpperCase() === 'POST') {
+    if (['/open-apis/im/v1/images','/open-apis/im/v1/files'].includes(pathname)) return 'upload';
     if (pathname === '/open-apis/im/v1/messages') return 'send';
     if (/^\/open-apis\/im\/v1\/messages\/[^/]+\/reply$/.test(pathname)) return 'reply';
     if (/^\/open-apis\/im\/v1\/messages\/[^/]+\/reactions$/.test(pathname)) return 'reaction';
@@ -67,7 +69,7 @@ export function createNetwork({signal} = {}) {
   };
   const httpInstance = lark.defaultHttpInstance.create({
     httpAgent: agent, httpsAgent: agent, proxy: false, signal: requestSignal,
-    timeout: 30000, maxRedirects: 0, maxContentLength: 4 * 1024 * 1024
+    timeout: 30000, maxRedirects: 0, maxContentLength: 4 * 1024 * 1024, maxBodyLength: 31 * 1024 * 1024
   });
   const requests = new WeakMap();
   httpInstance.interceptors.request.use(request => {
@@ -87,6 +89,14 @@ export function createNetwork({signal} = {}) {
       throw rememberHttpDiagnostics(new SafeError('Authentication response did not provide a usable token'), {
         ...details, error_type: Number.isSafeInteger(response.data?.code) && response.data.code !== 0 ? 'api_error' : 'invalid_response'
       });
+    }
+    // Upload methods in SDK 1.74 return only res.data, unlike message methods.
+    // Inspect business errors before that unwrap discards the code and diagnostics.
+    if (details.request_phase === 'upload') {
+      if (response.data?.code !== 0) throw rememberHttpDiagnostics(new SafeError('Resource upload response was not accepted'), {
+        ...details,error_type:Number.isSafeInteger(response.data?.code)&&response.data.code!==0?'api_error':'invalid_response'
+      });
+      rememberHttpDiagnostics(response.data.data,details);
     }
     const body = response.config.$return_headers ? {data: response.data, headers: response.headers} : response.data;
     return rememberHttpDiagnostics(body, details);
@@ -238,6 +248,28 @@ export async function sendMessage(client, {format = 'text', body, idempotencyKey
   const data = {...formatContent(format, body), uuid: key};
   if (Buffer.byteLength(data.content, 'utf8') > 28000) throw new SafeError('Card JSON must not exceed 28000 UTF-8 bytes');
   return sendData(client, data, target);
+}
+
+export async function uploadResource(client, {descriptor, idempotencyKey}, identity) {
+  const base = {idempotency_key:outgoingContent('validate key',idempotencyKey).uuid};
+  let file;
+  try { file = readUploadFile(descriptor); }
+  catch { return {ok:false,...base,status:'not_uploaded',request_phase:'validation',error_code:'invalid-attachment'}; }
+  const {kind,name,sha256,size,file_type} = file.descriptor;
+  const resource = {upload_id:idempotencyKey,app_id:identity.app_id,brand:identity.brand,kind,name,sha256,size,...(file_type ? {file_type} : {})};
+  try {
+    // SDK 1.74 builds multipart/form-data from the binary Buffer.
+    const response = kind === 'image'
+      ? await client.im.image.create({data:{image_type:'message',image:file.bytes}})
+      : await client.im.file.create({data:{file_type:'pdf',file_name:name,file:file.bytes}});
+    const key = response?.[kind+'_key'] ?? response?.data?.[kind+'_key'];
+    if ((response?.code === undefined || response.code === 0) && typeof key === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(key)) return {ok:true,...base,status:'uploaded',resource:{...resource,[kind+'_key']:key}};
+    const apiError = Number.isSafeInteger(response?.code) && response.code !== 0;
+    return {ok:false,...base,status:apiError?'api_error':'upload_unknown',request_phase:'upload',...getHttpDiagnostics(response),...responseCodes({data:response}),error_type:apiError?'api_error':'invalid_response'};
+  } catch (error) {
+    const details = {request_phase:'upload',...transportFailure(error),...getHttpDiagnostics(error)};
+    return {ok:false,...base,status:details.request_phase==='authentication'?'not_uploaded':details.error_type==='api_error'||details.http_status>=400&&details.http_status<500?'api_error':'upload_unknown',...details};
+  }
 }
 
 /** A reaction is an explicit transport operation, never an automatic receive hook. */
