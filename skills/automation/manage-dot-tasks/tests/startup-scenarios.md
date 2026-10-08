@@ -50,7 +50,7 @@ Review these against startup.md and the supporting contracts; record any unresol
 5. **Missing task scope:** ask new-only versus specified existing tasks. An explicit category grant covers only that category. In a mixed ledger, resolve IDs rather than using all. Honor a user-selected task executor independently of transport ownership.
 6. **Partial source discovery:** bind verified identities; record partial/unavailable coverage. Do not imply complete discovery or disclose unrelated records in a requested overview.
 7. **Matching receiver exists:** require selected config/account/brand/state and current lifecycle evidence, reuse its handle. Without that evidence, inspect rather than start a duplicate or claim connected.
-8. **Idle/yield/recovery:** collect yielded session result, re-arm normal timeout, retain existing decision/intent/receipt IDs after interruption; stop affected operations on persistent gaps without spinning.
+8. **Idle/yield/recovery:** collect yielded session results, process returned work and immediately re-arm after both work and idle timeout. Retain existing decision/intent/receipt IDs after interruption; stop affected operations on persistent gaps without spinning. An unchanged unknown delivery remains visible without repeatedly ending the wait or causing a resend.
 9. **Memory:** reuse a verified existing usage convention. Local init does not prove platform memory; report unavailable persistence separately.
 10. **Explicit computer hosting:** select the bridge only when the user requests that host; reuse one verified task and keep configuration/transport there while the ledger stays on dot. Missing tools block this route without changing hosts.
 11. **Old installation or unknown revision:** compare the actual installed files with the requested revision/manifest. Do not trust a matching skill name or package version. Stop for an unavailable update; preserve state/receipts. After verification, use one fixed absolute runtime root even if the working directory or catalog points to an older copy.
@@ -78,7 +78,7 @@ Review the new-instance workflow using synthetic state only. Platform scheduling
 
 - Full startup intent: preserve host/config/task/reply scope and explicit periodic-check/recovery authorization. Verify the enabled ten-minute automation and wait for its scheduled invocation before full success; manual `run_now` alone is insufficient.
 - Initial ordering: finish one bounded initial consumer call, establish/reuse the owning service context, create and verify the automation, then continuously re-arm; fresh installation requires no historical service record.
-- Live session: timed check reuses one receiver and then collects/re-arms the bounded consumer. Health without consumption is incomplete.
+- Live session: timed check reuses one receiver and then collects/re-arms the bounded consumer. Keep the continuous bounded call chain active between scheduled checks. Health without consumption, or one scan per ten-minute check, is incomplete.
 - Lost session: ordinary session loss with recovery still authorized leads to one actual tool launch using the pinned settings/store; repeatedly reading the old `blocked` result is insufficient. Held flock, network denial, unavailable context or unknown effects block unsafe takeover/replay. Successful replacement resumes consumption with existing IDs and scopes.
 - Stop: record cancellation in the existing owning context first, disable/verify this instance's automation and grant/connection, then EOF the owned session; an already queued invocation reads latest stop and does nothing. A stopped or revoked scope must never be revived by setup or inspection.
 - No recurring authority or explicit opt-out: do not create an automation. Report foreground-only readiness and its limits without inventing missing permission.
@@ -102,3 +102,32 @@ These are agent workflow checks against [recovery failure boundaries](../referen
 | A queued check arrives after stop/revocation | Read the latest stop first; do not restart or consume, even if the old environment blocker has cleared. Only fresh explicit user authority can revive the stopped scope. |
 
 Record evidence separately: local mock tests, actual tool-session execution, actual scheduled invocation, and live Feishu receipt/send. An actual TTY round trip with a mock connector proves only that execution path and synthetic effects; it proves neither live Feishu recovery nor a new scheduled trigger. Historical successful production checks do not turn a later failed replacement into successful recovery.
+
+## Continuous intake and platform task mapping review
+
+Run `node --test tests/continuous-intake.test.mjs tests/startup.test.mjs` for the
+focused idle/startup regressions. The temporary fixtures check two complete idle
+calls with unchanged unknown/not-sent/API-error state, recovery of a sending
+lease into a new unknown, new or changed issues beyond the first 20 displayed
+rows, and authorized messages arriving during the wait. No production state,
+receiver or platform task is used.
+
+Review these synthetic agent scenarios against
+[continuous consumption](../references/startup.md#continuous-consumption-and-wake-up-boundaries)
+and [platform task mapping](../references/platform-tasks.md):
+
+| Observation or request | Required outcome |
+| --- | --- |
+| Healthy receiver has persisted a message in SQLite; no agent call is active | Report receiver receipt and absent consumption separately. Re-arm through an authorized active agent or actual scheduled recovery; SQLite cannot wake the agent. |
+| A call returns unchanged historical delivery issues and an idle timeout | Preserve issues and original keys, then immediately issue the next bounded call without repeated warnings, clearing or resending. |
+| A new authorized request needs an inspectable task in the user's selected environment | Record intake, schedule, then begin, use actual create/read tools, record the real thread ID, bind, and ack. Preserve Feishu origin and action scope. |
+| Create may have succeeded but the tool result was lost | Keep the intent; query conclusive platform evidence before retrying. A missing item in a recent list does not permit a duplicate create. |
+| Receipt saved, but interruption happened before source binding | Read the saved real thread ID, verify/bind it, then ack; no new thread. |
+| A follow-up asks for status or continued work | Resolve the original scoped mapping, read the actual task and send authorized continuation to that same thread. |
+| The task reports a finished turn without the requested deliverable | Keep acceptance pending and continue authorized follow-up; do not mark complete from turn status. |
+| Creation succeeded but desktop visibility is unverified | Report the real task reference and the visibility gap separately; do not move execution or create a duplicate to force a card. |
+| A simple question or a future reminder arrives | Answer the question without an execution task; use actual automation tools for the reminder rather than claiming a ledger schedule is a platform wake-up. |
+
+These instruction checks do not prove actual platform creation, UI visibility,
+scheduled triggering or live replies; those require evidence in dot's selected
+execution environment.

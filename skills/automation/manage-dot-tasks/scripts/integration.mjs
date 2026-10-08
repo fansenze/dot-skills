@@ -371,6 +371,11 @@ export function createIntegration({store, scheduler, makeTask}) {
       const timeout = args.timeout_ms === undefined ? 30000 : Number(args.timeout_ms);
       if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > 60000) throw new ConnectorError('timeout-ms must be 0..60000');
       const deadline = performance.now() + timeout, consumer = args.consumer ?? 'dot-active';
+      const issueStates = new Set(['delivery_unknown', 'not_sent', 'api_error']);
+      // Retain old issues for inspection without interrupting every idle call.
+      // Snapshot before delivery recovery so a newly expired send still wakes dot.
+      const initialIssues = await locked(() => new Map(readConversations(store).deliveries
+        .filter(n => issueStates.has(n.state)).map(n => [n.id, n.state])));
       let ingested = 0; const notifications = [], gaps = [];
       do {
         const connections = await locked(() => readIntegration(store).connections.filter(c => c.enabled));
@@ -382,10 +387,16 @@ export function createIntegration({store, scheduler, makeTask}) {
         const conversations=createConversations({store});
         notifications.push(...(await conversations.run({command:'conversation-deliver',consumer,limit:args.limit??10,lease_ms:args.lease_ms})).deliveries);
         const dotDelivery=await conversations.run({command:'conversation-next',channel:'dot',consumer,lease_ms:args.lease_ms});
-        const conversationIssues=await locked(()=>{const rows=readConversations(store).deliveries.filter(n=>['delivery_unknown','not_sent','api_error'].includes(n.state));return {total:rows.length,deliveries:rows.slice(0,20).map(n=>({id:n.id,task_id:n.task_id,channel:n.channel,state:n.state}))};});
+        const {conversationIssues, issuesChanged} = await locked(() => {
+          const rows = readConversations(store).deliveries.filter(n => issueStates.has(n.state));
+          return {
+            conversationIssues: {total: rows.length, deliveries: rows.slice(0, 20).map(n => ({id:n.id, task_id:n.task_id, channel:n.channel, state:n.state}))},
+            issuesChanged: rows.some(n => initialIssues.get(n.id) !== n.state),
+          };
+        });
         const claimed = await messages.claim({consumer,limit:args.limit ?? 1,lease_ms:args.lease_ms,require_receipt_attempt:true});
-        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: claimed.messages.length || dotDelivery ? 0 : Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
-        if (conversationIssues.total || dotDelivery || claimed.messages.length || queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
+        const queued = await scheduler.wait({command: 'wait', consumer, timeout_ms: issuesChanged || claimed.messages.length || dotDelivery ? 0 : Math.max(0, Math.min(1000, Math.round(deadline - performance.now()))), limit: args.limit ?? 1, lease_ms: args.lease_ms});
+        if (issuesChanged || dotDelivery || claimed.messages.length || queued.batch.length || ingested || notifications.length || gaps.length || performance.now() >= deadline) {
           return {...queued, conversation_issues:conversationIssues, conversation_deliveries:{dot:dotDelivery?[dotDelivery]:[]}, messages:claimed.messages, ingested, notifications, receive_gaps: gaps, readiness: connections.length ? 'configured-bindings; live transport not attested' : 'local-only; no server binding'};
         }
       } while (true);

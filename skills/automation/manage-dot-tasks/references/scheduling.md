@@ -12,6 +12,13 @@ bounded wait. Tool timeouts and execution-environment failures are recoverable
 parts of that workflow. Initializing a store or launching an unattended process
 does not establish that dot is consuming it.
 
+For integrated Feishu intake, use the continuous `start` chain described in
+[startup](startup.md#continuous-consumption-and-wake-up-boundaries): collect each
+bounded result, process it, then immediately re-arm. Ten-minute health/recovery
+automations cannot replace this active consumer. A local ledger registration is
+also not a platform task; follow [real platform task mapping](platform-tasks.md)
+when authorized work needs a separately inspectable execution thread.
+
 ## Intake, discovery, and identity
 
 Use the same store for user commitments in this conversation, dot-delegated work,
@@ -143,7 +150,8 @@ scope instead of stopping after an initial status report:
    returned execution reference and observed state with `record` below. A result
    may only mean a delegation was accepted or a turn ended; it need not mean the
    user's task is complete. Continue tracking and acceptance separately.
-6. After the result is durably recorded, `ack REQUEST_ID --token TOKEN`. Repeat
+6. After the result is durably recorded, verify any [platform task mapping](platform-tasks.md)
+   and `bind` its real thread ID before `ack REQUEST_ID --token TOKEN`. Repeat
    ack with the same token if its response was lost; it is idempotent. Any
    separately authorized notification comes after persistent result recording
    and needs its own send-result handling. This scheduler sends nothing.
